@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find '/Users/jacksheppard/Downloads/dashboard 2' -type f -name package.json -o -name *.config.js -o -name *.config.ts -o -name .env -o -name .env.local -o -name requirements.txt -o -name setup.py)",
+      "Bash(file /Users/jacksheppard/Downloads/dashboard 2/*)",
+      "Bash(find /Users/jacksheppard/Downloads -maxdepth 3 -type f -name package.json -o -name *.config.* -o -name Dockerfile -o -name docker-compose.yml -o -name .env* -o -name requirements.txt -o -name setup.py -o -name Makefile -o -name *.sh)",
+      "mcp__Claude_Preview__preview_start",
+      "Read(//usr/local/bin/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(/opt/homebrew/bin/python3.10 --version)",
+      "Bash(grep -i \"react\\\\|vue\\\\|angular\\\\|svelte\\\\|framework\" /Users/jacksheppard/Downloads/\"Executive Dashboard\"/js/*.js)",
+      "Bash(node --check \"/Users/jacksheppard/Downloads/Executive Dashboard/js/bundle.js\")",
+      "Bash(ls /usr/local/bin/node*)",
+      "Bash(ls /opt/homebrew/bin/node*)",
+      "Bash(/usr/local/bin/node --check \"/Users/jacksheppard/Downloads/Executive Dashboard/js/bundle.js\")"
+    ]
+  }
+}

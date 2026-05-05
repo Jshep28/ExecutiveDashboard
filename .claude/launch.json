@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Dashboard (Python)",
+      "runtimeExecutable": "/opt/homebrew/bin/python3.10",
+      "runtimeArgs": ["-m", "http.server", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "Dashboard (Node npx)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["http-server", ".", "--cors"],
+      "port": 8080,
+      "autoPort": true
+    }
+  ]
+}

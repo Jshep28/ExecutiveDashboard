@@ -1,0 +1,60 @@
+/* ============================================================
+   THEME.CSS — Default brand theme. Replace variables to white-label.
+   ============================================================ */
+
+:root {
+  
+  /* === BRAND COLOURS — swap these for each client === */
+  --brand-primary:     #0A2540;
+  --brand-accent:      #00C2A8;
+  --brand-accent-2:    #3A86FF;
+  --brand-logo-url:    none; /* set to url('/assets/logo.svg') */
+
+  /* === RAG Status === */
+  --rag-red:           #FF4444;
+  --rag-red-bg:        rgba(255,68,68,0.10);
+  --rag-amber:         #FF9F1C;
+  --rag-amber-bg:      rgba(255,159,28,0.10);
+  --rag-green:         #00C48C;
+  --rag-green-bg:      rgba(0,196,140,0.10);
+  --rag-neutral:       #6B7A99;
+  --rag-neutral-bg:    rgba(107,122,153,0.10);
+
+  /* === Surface & Background === */
+  --bg-page:           #0D1B2A;
+  --bg-card:           #132236;
+  --bg-card-hover:     #18304A;
+  --bg-input:          #0A1E30;
+  --bg-sidebar:        #091929;
+  --bg-modal:          #132236;
+  --border-subtle:     rgba(255,255,255,0.06);
+  --border-card:       rgba(255,255,255,0.08);
+
+  /* === Text === */
+  --text-primary:      #E8F0FE;
+  --text-secondary:    #8CA0BE;
+  --text-muted:        #4A6480;
+  --text-accent:       #00C2A8;
+
+  /* === Typography === */
+  --font-display:      'DM Sans', sans-serif;
+  --font-body:         'Inter', sans-serif;
+  --font-mono:         'JetBrains Mono', monospace;
+
+  /* === Spacing === */
+  --sidebar-width:     240px;
+  --header-height:     60px;
+  --card-radius:       12px;
+  --card-padding:      20px;
+
+  /* === Shadows === */
+  --shadow-card:       0 2px 16px rgba(0,0,0,0.35);
+  --shadow-modal:      0 8px 48px rgba(0,0,0,0.60);
+
+  /* === Transitions === */
+  --transition-fast:   0.15s ease;
+  --transition-med:    0.25s ease;
+}
+
+/* Light theme override — uncomment if needed */
+/* [data-theme="light"] { --bg-page: #F0F4F8; --bg-card: #FFFFFF; ... } */
