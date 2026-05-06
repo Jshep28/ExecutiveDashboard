@@ -515,7 +515,7 @@ const OverviewPanel = (() => {
          </div>`
       : allKpis.length > 0 ? '' : `
          <div class="card" style="text-align:center;padding:40px;margin-bottom:24px">
-           <div style="font-size:32px;margin-bottom:12px">◈</div>
+           <div style="font-size:32px;margin-bottom:12px"><i data-lucide="layout-dashboard" style="width:32px;height:32px"></i></div>
            <div style="font-size:16px;font-weight:600;margin-bottom:6px">No Key Metrics yet</div>
            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
              In Data Entry, tick the <strong>Ovw</strong> checkbox next to any KPI to pin it here.
@@ -621,7 +621,7 @@ const OverviewPanel = (() => {
                            font-size:12px;font-weight:500;border:1px solid var(--border-card);
                            background:var(--bg-card);color:var(--text-secondary);cursor:pointer;transition:all 0.15s"
                     onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
-              ⊞ Manage KPIs
+              <i data-lucide="table-2"></i> Manage KPIs
               <span style="background:rgba(0,194,168,0.15);color:var(--brand-accent);font-size:10px;
                            padding:1px 6px;border-radius:10px;font-weight:700">${overviewKpis.length}/${allKpis.length}</span>
             </button>
@@ -654,7 +654,7 @@ const OverviewPanel = (() => {
             <option value="quarterly" ${settings.reportingPeriod==='quarterly'?'selected':''}>Quarterly</option>
             <option value="ytd"       ${settings.reportingPeriod==='ytd'?'selected':''}>YTD</option>
             <option value="yearly"    ${settings.reportingPeriod==='yearly'?'selected':''}>Full Year</option>
-            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY ⏳</option>
+            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY</option>
           </select>
         </div>
       </div>`;
@@ -762,7 +762,7 @@ const OverviewPanel = (() => {
 
     const cardContent = isEmpty
       ? `<div style="text-align:center;padding:48px 24px;color:var(--text-muted)">
-           <div style="font-size:36px;margin-bottom:12px">◈</div>
+           <div style="font-size:36px;margin-bottom:12px"><i data-lucide="layout-dashboard" style="width:36px;height:36px"></i></div>
            <div style="font-size:15px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">No KPIs configured</div>
            <div style="font-size:13px;margin-bottom:16px">Add KPIs in Data Entry to visualise them here.</div>
            <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
@@ -811,7 +811,7 @@ const OverviewPanel = (() => {
                       style="background:var(--bg-input);border:1px solid var(--border-card);
                              border-radius:7px;padding:5px 10px;cursor:pointer;
                              color:var(--text-secondary);font-size:16px;letter-spacing:2px">
-                •••
+                <i data-lucide="more-horizontal"></i>
               </button>
               ${menuDropdown}
             </div>
