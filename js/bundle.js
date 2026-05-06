@@ -1408,7 +1408,7 @@ const Components = (() => {
   function xlsxImportPanel() {
     return `
       <div class="card" style="border:2px dashed var(--brand-accent);background:rgba(0,194,168,0.04);text-align:center;padding:28px">
-        <div style="font-size:28px;margin-bottom:10px">📊</div>
+        <div style="margin-bottom:10px;display:flex;justify-content:center"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand-accent)"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg></div>
         <div style="font-family:var(--font-display);font-size:15px;font-weight:600;margin-bottom:6px">Import XLSX / CSV</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;line-height:1.6">
           Upload a spreadsheet with columns:<br>
@@ -3268,14 +3268,14 @@ const Pages = (() => {
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost" style="font-size:12px" onclick="App.promptRenameSection('${encodeURIComponent(sectionName)}')">✎ Rename</button>
-            <button class="btn btn-ghost" style="font-size:12px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${encodeURIComponent(sectionName)}')">🗑 Remove</button>
+            <button class="btn btn-ghost" style="font-size:12px;color:var(--rag-red);display:inline-flex;align-items:center;gap:4px" onclick="App.confirmRemoveSection('${encodeURIComponent(sectionName)}')"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> Remove</button>
           </div>
         </div>
         ${Components.ragSummaryBar(kpis, mode)}
         ${kpis.length>0?`
           <div class="grid-auto">${kpis.map(kpi=>Components.kpiCard(kpi, DataStore.getPeriodStats(kpi, DataStore.getSettings().reportingPeriod||'monthly'), false)).join('')}</div>`:`
           <div class="card" style="text-align:center;padding:40px">
-            <div style="font-size:28px;margin-bottom:10px">📋</div>
+            <div style="margin-bottom:10px;display:flex;justify-content:center"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted)"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg></div>
             <div style="font-size:15px;font-weight:600;margin-bottom:6px">No KPIs in this section</div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Add KPIs from Data Entry and assign them to this section.</div>
             <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
@@ -3327,7 +3327,7 @@ const Pages = (() => {
     if (allKpis.length === 0) {
       return `
         <div class="card" style="text-align:center;padding:56px 40px;border:2px dashed var(--border-card)">
-          <div style="font-size:40px;margin-bottom:14px">📋</div>
+          <div style="margin-bottom:14px;display:flex;justify-content:center"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted)"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg></div>
           <div style="font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:8px">No KPIs yet</div>
           <div style="font-size:13px;color:var(--text-secondary);max-width:360px;margin:0 auto 20px">
             Start by creating a section, then add your KPIs. You can also bulk-import from XLSX or CSV.
@@ -3346,7 +3346,7 @@ const Pages = (() => {
       <div style="margin-bottom:20px">
         <details style="background:var(--bg-card);border:1px solid var(--border-card);border-radius:10px;overflow:hidden">
           <summary style="padding:12px 16px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-secondary);list-style:none;display:flex;align-items:center;gap:8px">
-            <span style="font-size:16px">📊</span> Bulk Import via XLSX / CSV
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg> Bulk Import via XLSX / CSV
             <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">click to expand ▾</span>
           </summary>
           <div style="padding:16px;border-top:1px solid var(--border-subtle)">${Components.xlsxImportPanel()}</div>
@@ -4005,7 +4005,7 @@ const Pages = (() => {
 
         <div style="background:rgba(58,134,255,0.07);border:1px solid rgba(58,134,255,0.18);border-radius:10px;
                     padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--text-secondary);line-height:1.7">
-          💡 <strong style="color:var(--text-primary)">Target vs Colour Rule:</strong>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;flex-shrink:0;color:var(--brand-accent)"><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg> <strong style="color:var(--text-primary)">Target vs Colour Rule:</strong>
           The target (e.g. <code style="font-family:var(--font-mono);color:var(--brand-accent)">&gt; 80%</code>) defines success.
           The colour rule defines <em>how close you need to be</em> to turn Green or Amber.
           A KPI with an operator target and no rule auto-colours: Green if met, Red if not.
@@ -4199,7 +4199,7 @@ const Pages = (() => {
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <div class="label-xs" style="flex:1;padding-bottom:5px;border-bottom:1px solid var(--border-subtle)">${_esc(section)}</div>
         <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px" onclick="App.promptRenameSection('${enc}')">✎ Rename</button>
-        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${enc}')">🗑 Remove</button>
+        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--rag-red);display:inline-flex;align-items:center;gap:3px" onclick="App.confirmRemoveSection('${enc}')"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> Remove</button>
       </div>`;
   }
 
@@ -5388,7 +5388,7 @@ const App = (() => {
       overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:500;display:flex;align-items:center;justify-content:center;padding:24px 16px';
       overlay.innerHTML = `
         <div style="background:var(--bg-modal);border:1px solid var(--border-card);border-radius:16px;padding:24px 20px;max-width:360px;width:calc(100% - 32px);box-shadow:var(--shadow-modal);text-align:center">
-          <div style="font-size:28px;margin-bottom:12px">🖥️</div>
+          <div style="margin-bottom:12px;display:flex;justify-content:center"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted)"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
           <div style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:8px">Desktop Recommended</div>
           <div style="font-size:13px;color:var(--text-secondary);line-height:1.5;margin-bottom:20px">Monthly data entry works best on a larger screen. You can still continue on mobile, but it may be cramped.</div>
           <div style="display:flex;gap:10px;justify-content:center">
