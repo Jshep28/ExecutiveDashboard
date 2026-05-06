@@ -54,7 +54,7 @@ const Components = (() => {
               title="${kpi.isKey?'Remove from Key Metrics':'Add to Key Metrics'}"
               style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;
                      color:${kpi.isKey?'var(--brand-accent)':'var(--text-muted)'};transition:color 0.15s;flex-shrink:0">
-        ${kpi.isKey?'★':'☆'}
+        ${kpi.isKey?'<i class="fa-solid fa-star"></i>':'<i class="fa-regular fa-star"></i>'}
       </button>` : '';
 
     return `
@@ -489,7 +489,7 @@ const Components = (() => {
   function xlsxImportPanel() {
     return `
       <div class="card" style="border:2px dashed var(--brand-accent);background:rgba(0,194,168,0.04);text-align:center;padding:28px">
-        <div style="font-size:28px;margin-bottom:10px">📊</div>
+        <div style="font-size:28px;margin-bottom:10px"><i class="fa-solid fa-chart-bar"></i></div>
         <div style="font-family:var(--font-display);font-size:15px;font-weight:600;margin-bottom:6px">Import XLSX / CSV</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;line-height:1.6">
           Upload a spreadsheet with columns:<br>
@@ -620,7 +620,7 @@ const Components = (() => {
               <div style="display:flex;align-items:center;gap:8px;padding-top:18px">
                 <input type="checkbox" id="fml-iskey" ${kpi?.isKey?'checked':''}
                        style="accent-color:var(--brand-accent);width:15px;height:15px;cursor:pointer">
-                <label for="fml-iskey" class="label-sm" style="cursor:pointer">★ Pin to Overview (Key KPI)</label>
+                <label for="fml-iskey" class="label-sm" style="cursor:pointer"><i class="fa-solid fa-star"></i> Pin to Overview (Key KPI)</label>
               </div>
             </div>
             <div>

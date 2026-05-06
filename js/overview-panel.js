@@ -654,7 +654,7 @@ const OverviewPanel = (() => {
             <option value="quarterly" ${settings.reportingPeriod==='quarterly'?'selected':''}>Quarterly</option>
             <option value="ytd"       ${settings.reportingPeriod==='ytd'?'selected':''}>YTD</option>
             <option value="yearly"    ${settings.reportingPeriod==='yearly'?'selected':''}>Full Year</option>
-            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY ⏳</option>
+            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY</option>
           </select>
         </div>
       </div>`;

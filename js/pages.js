@@ -63,14 +63,14 @@ const Pages = (() => {
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost" style="font-size:12px" onclick="App.promptRenameSection('${encodeURIComponent(sectionName)}')">✎ Rename</button>
-            <button class="btn btn-ghost" style="font-size:12px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${encodeURIComponent(sectionName)}')">🗑 Remove</button>
+            <button class="btn btn-ghost" style="font-size:12px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${encodeURIComponent(sectionName)}')"><i class="fa-solid fa-trash-can"></i> Remove</button>
           </div>
         </div>
         ${Components.ragSummaryBar(kpis)}
         ${kpis.length>0?`
           <div class="grid-auto">${kpis.map(kpi=>Components.kpiCard(kpi, DataStore.getPeriodStats(kpi, DataStore.getSettings().reportingPeriod||'monthly'), false)).join('')}</div>`:`
           <div class="card" style="text-align:center;padding:40px">
-            <div style="font-size:28px;margin-bottom:10px">📋</div>
+            <div style="font-size:28px;margin-bottom:10px"><i class="fa-solid fa-clipboard-list"></i></div>
             <div style="font-size:15px;font-weight:600;margin-bottom:6px">No KPIs in this section</div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Add KPIs from Data Entry and assign them to this section.</div>
             <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
@@ -122,7 +122,7 @@ const Pages = (() => {
     if (allKpis.length === 0) {
       return `
         <div class="card" style="text-align:center;padding:56px 40px;border:2px dashed var(--border-card)">
-          <div style="font-size:40px;margin-bottom:14px">📋</div>
+          <div style="font-size:40px;margin-bottom:14px"><i class="fa-solid fa-clipboard-list"></i></div>
           <div style="font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:8px">No KPIs yet</div>
           <div style="font-size:13px;color:var(--text-secondary);max-width:360px;margin:0 auto 20px">
             Start by creating a section, then add your KPIs. You can also bulk-import from XLSX or CSV.
@@ -140,7 +140,7 @@ const Pages = (() => {
       <div style="margin-bottom:20px">
         <details style="background:var(--bg-card);border:1px solid var(--border-card);border-radius:10px;overflow:hidden">
           <summary style="padding:12px 16px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-secondary);list-style:none;display:flex;align-items:center;gap:8px">
-            <span style="font-size:16px">📊</span> Bulk Import via XLSX / CSV
+            <i class="fa-solid fa-chart-bar"></i> Bulk Import via XLSX / CSV
             <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">click to expand ▾</span>
           </summary>
           <div style="padding:16px;border-top:1px solid var(--border-subtle)">${Components.xlsxImportPanel()}</div>
@@ -157,7 +157,7 @@ const Pages = (() => {
                      placeholder="Search KPIs…"
                      value="${App._kpiSearchQuery||''}"
                      oninput="App.setKpiSearch(this.value)">
-              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none">⌕</span>
+              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none"><i class="fa-solid fa-magnifying-glass"></i></span>
             </div>` : `
             <div style="position:relative;flex:1;max-width:280px">
               <input type="text" id="kpi-search-simple" class="input-field"
@@ -165,7 +165,7 @@ const Pages = (() => {
                      placeholder="Search KPIs…"
                      value="${App._simpleSearchQuery||''}"
                      oninput="App.setSimpleKpiSearch(this.value)">
-              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none">⌕</span>
+              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none"><i class="fa-solid fa-magnifying-glass"></i></span>
             </div>`}
         </div>
         <button onclick="App.toggleAdvancedEntry()"
@@ -744,7 +744,7 @@ const Pages = (() => {
 
         <div style="background:rgba(58,134,255,0.07);border:1px solid rgba(58,134,255,0.18);border-radius:10px;
                     padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--text-secondary);line-height:1.7">
-          💡 <strong style="color:var(--text-primary)">Target vs Colour Rule:</strong>
+          <i class="fa-solid fa-lightbulb"></i> <strong style="color:var(--text-primary)">Target vs Colour Rule:</strong>
           The target (e.g. <code style="font-family:var(--font-mono);color:var(--brand-accent)">&gt; 80%</code>) defines success.
           The colour rule defines <em>how close you need to be</em> to turn Green or Amber.
           A KPI with an operator target and no rule auto-colours: Green if met, Red if not.
@@ -895,7 +895,7 @@ const Pages = (() => {
                 <option value="quarterly"${s.reportingPeriod==='quarterly'?'selected':''}>Quarterly</option>
                 <option value="ytd"      ${s.reportingPeriod==='ytd'?'selected':''}>YTD</option>
                 <option value="yearly"   ${s.reportingPeriod==='yearly'?'selected':''}>Full Year</option>
-                <option value="last_fy"  ${s.reportingPeriod==='last_fy'?'selected':''}>Last FY ⏳</option>
+                <option value="last_fy"  ${s.reportingPeriod==='last_fy'?'selected':''}>Last FY</option>
               </select>
             </div>
             <div>
@@ -923,7 +923,7 @@ const Pages = (() => {
           <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">All data stored in browser localStorage. Export or reset below.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost" onclick="App.exportData()">↓ Export JSON</button>
-            <button class="btn btn-ghost" style="color:var(--rag-red)" onclick="App.confirmReset()">⚠ Reset All Data</button>
+            <button class="btn btn-ghost" style="color:var(--rag-red)" onclick="App.confirmReset()"><i class="fa-solid fa-triangle-exclamation"></i> Reset All Data</button>
           </div>
         </div>
       </div>`;
@@ -935,7 +935,7 @@ const Pages = (() => {
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <div class="label-xs" style="flex:1;padding-bottom:5px;border-bottom:1px solid var(--border-subtle)">${_esc(section)}</div>
         <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px" onclick="App.promptRenameSection('${enc}')">✎ Rename</button>
-        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${enc}')">🗑 Remove</button>
+        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${enc}')"><i class="fa-solid fa-trash-can"></i> Remove</button>
       </div>`;
   }
 
@@ -990,7 +990,7 @@ const Pages = (() => {
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
                 <span style="font-family:var(--font-display);font-size:16px;font-weight:700">${_esc(kpi.metric)}</span>
                 <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(0,194,168,0.12);color:var(--brand-accent);font-weight:600;letter-spacing:0.06em">∑ FORMULA</span>
-                ${kpi.isKey ? '<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(58,134,255,0.12);color:var(--brand-accent-2);font-weight:600">★ KEY</span>' : ''}
+                ${kpi.isKey ? '<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(58,134,255,0.12);color:var(--brand-accent-2);font-weight:600"><i class="fa-solid fa-star"></i> KEY</span>' : ''}
               </div>
               <div style="font-size:11px;color:var(--text-muted)">${_esc(kpi.section)} ${kpi.who ? '· ' + _esc(kpi.who) : ''}</div>
             </div>
@@ -1036,7 +1036,7 @@ const Pages = (() => {
     const howItWorks = `
       <div class="card" style="margin-top:24px;border:1px dashed var(--border-card)">
         <div style="font-family:var(--font-display);font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px">
-          <span style="color:var(--brand-accent)">ⓘ</span> How Formula KPIs work
+          <i class="fa-solid fa-circle-info" style="color:var(--brand-accent)"></i> How Formula KPIs work
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;font-size:13px;color:var(--text-secondary);line-height:1.6">
           <div><strong style="color:var(--text-primary)">Auto-computed</strong><br>Values recalculate instantly whenever any source KPI is updated.</div>
@@ -1060,7 +1060,7 @@ const Pages = (() => {
 
         ${sourceKpis.length === 0 ? `
           <div class="card" style="text-align:center;padding:40px;margin-bottom:24px">
-            <div style="font-size:24px;margin-bottom:10px">⚠</div>
+            <div style="font-size:24px;margin-bottom:10px"><i class="fa-solid fa-triangle-exclamation"></i></div>
             <div style="font-size:14px;font-weight:600;margin-bottom:6px">No source KPIs yet</div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Add some KPIs in Data Entry first — formula KPIs compute their values from existing KPIs.</div>
             <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>

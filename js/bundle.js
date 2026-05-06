@@ -42,13 +42,6 @@ const DataStore = (() => {
     _thresholds = _loadThresholds();
     _kpis       = _loadKpis();
     _formulas   = _loadFormulas();
-    // Migrate: stamp isFormula on any KPI that has a matching formula definition
-    const fmlKpiIds = new Set(_formulas.map(f => f.kpiId));
-    let migrated = false;
-    _kpis.forEach(k => {
-      if (fmlKpiIds.has(k.id) && !k.isFormula) { k.isFormula = true; migrated = true; }
-    });
-    if (migrated) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_kpis)); } catch(e) {} }
     _computeRag();
     _applyAllFormulas();
   }
@@ -377,10 +370,8 @@ const DataStore = (() => {
       thresholdId:   fields.thresholdId   || 'th_manual_only',
       comment:       fields.comment       || '',
       isKey:         fields.isKey         || false,
-      isFormula:      fields.isFormula       || false,
-      monthlyActuals: fields.monthlyActuals  || {},
-      ytdMethod:      fields.ytdMethod       || 'sum',   // 'sum' | 'avg' | 'last' | 'max' | 'min'
-      autoCalcTargets: fields.autoCalcTargets || 'none', // 'none' | 'fy_from_month' | 'month_from_fy'
+      monthlyActuals: fields.monthlyActuals || {},
+      ytdMethod:     fields.ytdMethod      || 'sum',  // 'sum' | 'avg' | 'last' | 'max' | 'min'
     };
     _kpis.push(kpi);
     _computeRag(); _save(); _notify();
@@ -391,13 +382,8 @@ const DataStore = (() => {
     const kpi = _kpis.find(k=>k.id===id);
     if (!kpi) return;
     Object.assign(kpi, fields);
-    // Per-KPI auto-calc: only when the user has opted in via autoCalcTargets
-    const act   = kpi.autoCalcTargets || 'none';
-    const isPct = kpi.unit === '%';
-    if (act === 'fy_from_month' && kpi.targetMonth !== null && fields.targetFY26 === undefined)
-      kpi.targetFY26 = isPct ? kpi.targetMonth : kpi.targetMonth * 12;
-    else if (act === 'month_from_fy' && kpi.targetFY26 !== null && fields.targetMonth === undefined)
-      kpi.targetMonth = isPct ? kpi.targetFY26 : kpi.targetFY26 / 12;
+    if (kpi.targetMonth!==null && fields.targetFY26===undefined && !kpi.targetFY26Op && kpi.targetMonth)
+      kpi.targetFY26 = kpi.targetMonth * 12;
     _applyAllFormulas();
     _computeRag(); _save(); _notify();
   }
@@ -431,27 +417,6 @@ const DataStore = (() => {
     kpi.actual = enteredMonths.length > 0 ? kpi.monthlyActuals[enteredMonths[enteredMonths.length-1]] : null;
     _applyAllFormulas();
     _computeRag(); _save(); _notify();
-  }
-
-  /** Recompute ytd/actual for a KPI from its existing monthlyActuals using its current ytdMethod */
-  function recomputeKpiYtd(id) {
-    const kpi = _kpis.find(k=>k.id===id);
-    if (!kpi) return;
-    const fyMonths = getFyMonths();
-    const entered = fyMonths.filter(m => kpi.monthlyActuals?.[m] !== undefined);
-    const vals = entered.map(m => kpi.monthlyActuals[m]);
-    if (vals.length === 0) { kpi.ytd = null; kpi.actual = null; }
-    else {
-      const method = kpi.ytdMethod || 'sum';
-      if      (method === 'sum')  kpi.ytd = vals.reduce((a,b)=>a+b, 0);
-      else if (method === 'avg')  kpi.ytd = vals.reduce((a,b)=>a+b, 0) / vals.length;
-      else if (method === 'last') kpi.ytd = vals[vals.length - 1];
-      else if (method === 'max')  kpi.ytd = Math.max(...vals);
-      else if (method === 'min')  kpi.ytd = Math.min(...vals);
-      else                        kpi.ytd = vals.reduce((a,b)=>a+b, 0);
-      kpi.actual = kpi.monthlyActuals[entered[entered.length - 1]];
-    }
-    _applyAllFormulas(); _computeRag(); _save(); _notify();
   }
 
   function removeKpi(id) { _kpis=_kpis.filter(k=>k.id!==id); _save(); _notify(); }
@@ -519,22 +484,6 @@ const DataStore = (() => {
   // ── Import ────────────────────────────────────────────────────────────────
   function importFromRows(rows) {
     let updated = 0, added = 0;
-
-    // Helper: derive ytd + actual from a monthlyActuals map
-    function _deriveFromMonthly(monthlyActuals, ytdMethod) {
-      const fyMs   = getFyMonths();
-      const entered = fyMs.filter(m => monthlyActuals[m] !== undefined);
-      if (!entered.length) return {};
-      const vals = entered.map(m => monthlyActuals[m]);
-      let ytd;
-      if      (ytdMethod === 'avg')  ytd = vals.reduce((a,b)=>a+b,0)/vals.length;
-      else if (ytdMethod === 'last') ytd = vals[vals.length-1];
-      else if (ytdMethod === 'max')  ytd = Math.max(...vals);
-      else if (ytdMethod === 'min')  ytd = Math.min(...vals);
-      else                           ytd = vals.reduce((a,b)=>a+b,0); // sum default
-      return { ytd, actual: monthlyActuals[entered[entered.length-1]] };
-    }
-
     rows.forEach(row => {
       if (!row.metric) return;
       const existing = _kpis.find(k => k.metric.toLowerCase().trim() === row.metric.toLowerCase().trim());
@@ -544,24 +493,15 @@ const DataStore = (() => {
         if (row.unit)                                        u.unit         = row.unit;
         if (row.targetLabel)                                 u.targetLabel  = row.targetLabel;
         if (row.targetFY26Op)                                u.targetFY26Op = row.targetFY26Op;
-        // Always include targetFY26 explicitly — even when empty — so updateKpi's
-        // auto-calc (targetMonth * 12) never fires and overwrites a blank import cell.
-        u.targetFY26 = !isNaN(parseFloat(row.targetFY26))
-          ? parseFloat(row.targetFY26)
-          : existing.targetFY26 ?? null;
+        if (!isNaN(parseFloat(row.targetFY26)))              u.targetFY26   = parseFloat(row.targetFY26);
         if (!isNaN(parseFloat(row.ytd)))                     u.ytd          = parseFloat(row.ytd);
         if (!isNaN(parseFloat(row.targetMonth)))             u.targetMonth  = parseFloat(row.targetMonth);
         if (!isNaN(parseFloat(row.actual)))                  u.actual       = parseFloat(row.actual);
         if (row.rag)                                         u.ragOverride  = row.rag.toLowerCase().trim();
         if (row.comment)                                     u.comment      = row.comment;
-        // Merge monthly actuals and re-derive ytd/actual
-        if (row.monthlyActuals && Object.keys(row.monthlyActuals).length > 0) {
-          u.monthlyActuals = { ...(existing.monthlyActuals || {}), ...row.monthlyActuals };
-          Object.assign(u, _deriveFromMonthly(u.monthlyActuals, existing.ytdMethod || 'sum'));
-        }
         updateKpi(existing.id, u); updated++;
       } else {
-        const kpiFields = {
+        addKpi({
           section:      row.section      || 'Imported',
           metric:       row.metric,
           who:          row.who          || '',
@@ -571,12 +511,8 @@ const DataStore = (() => {
           targetFY26:   isNaN(parseFloat(row.targetFY26))  ? null : parseFloat(row.targetFY26),
           targetMonth:  isNaN(parseFloat(row.targetMonth)) ? null : parseFloat(row.targetMonth),
           ytd:          isNaN(parseFloat(row.ytd))         ? null : parseFloat(row.ytd),
-        };
-        if (row.monthlyActuals && Object.keys(row.monthlyActuals).length > 0) {
-          kpiFields.monthlyActuals = row.monthlyActuals;
-          Object.assign(kpiFields, _deriveFromMonthly(row.monthlyActuals, 'sum'));
-        }
-        addKpi(kpiFields); added++;
+        });
+        added++;
       }
     });
     return { updated, added };
@@ -777,24 +713,14 @@ const DataStore = (() => {
       periodLabel = 'Month Actual';
 
     } else if (mode === 'quarterly') {
-      const curQ     = getCurrentFyQuarter();
-      // Try current quarter first; if empty, walk back to find the most recent quarter with data
-      let q = curQ;
-      let qMonths = getFyQuarterMonths(q);
-      let qActual = aggregateMonths(qMonths);
-      if (qActual === null && q > 1) {
-        for (let tryQ = q - 1; tryQ >= 1; tryQ--) {
-          const tryMonths = getFyQuarterMonths(tryQ);
-          const tryActual = aggregateMonths(tryMonths);
-          if (tryActual !== null) { q = tryQ; qMonths = tryMonths; qActual = tryActual; break; }
-        }
-      }
-      actual         = qActual;
+      const q        = getCurrentFyQuarter();
+      const qMonths  = getFyQuarterMonths(q);
+      actual         = aggregateMonths(qMonths);
       // Point-in-time methods compare against monthly target; additive (sum) scales up
       target         = isPointInTime
         ? tgtMonth
         : (tgtMonth !== null ? tgtMonth * 3 : (tgtFY !== null ? tgtFY / 4 : null));
-      label          = 'Q' + q + ' ' + fyLabel + (q !== curQ ? ' (latest)' : '');
+      label          = 'Q' + q + ' ' + fyLabel;
       periodLabel    = method === 'avg' ? 'Quarterly Avg' : method === 'last' ? 'Latest Month' : method === 'max' ? 'Quarter High' : method === 'min' ? 'Quarter Low' : 'Quarterly Total';
 
     } else if (mode === 'ytd') {
@@ -850,13 +776,12 @@ const DataStore = (() => {
 
   function subscribe(fn) { _subscribers.push(fn); }
 
-  /** Get KPIs to show on the Overview page (filtered and ordered by overviewKpiIds if set). */
+  /** Get KPIs to show on the Overview page (filtered by overviewKpiIds if set). */
   function getOverviewKpis() {
     const ids = _settings.overviewKpiIds;
     const keyKpis = _kpis.filter(k => k.isKey);
     if (!ids) return keyKpis;
-    return keyKpis.filter(k => ids.includes(k.id))
-                  .sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+    return keyKpis.filter(k => ids.includes(k.id));
   }
 
   /** Persist the set of KPI ids selected for the overview panel. null = all key KPIs. */
@@ -865,14 +790,6 @@ const DataStore = (() => {
     _save(); _notify();
   }
   function _notify() { _subscribers.forEach(fn=>fn()); }
-
-  function restoreFromBackup(data) {
-    if (data.kpis)       { _kpis = data.kpis; _nextId = _kpis.reduce((m,k)=>Math.max(m,parseInt(k.id?.replace('kpi_','')||0)),0)+1; }
-    if (data.thresholds) { _thresholds = data.thresholds; }
-    if (data.formulas)   { _formulas = data.formulas; _saveFormulas(); }
-    if (data.settings)   { Object.assign(_settings, data.settings); }
-    _applyAllFormulas(); _computeRag(); _save(); _notify();
-  }
 
   function resetToDefaults() {
     localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SETTINGS_KEY); localStorage.removeItem(THRESHOLD_KEY);
@@ -891,7 +808,7 @@ const DataStore = (() => {
     getSettings, updateSettings, getFyMonths,
     getCurrentMonth, getFyMonthsElapsed, getFyMonthsToDate, getCurrentFyQuarter,
     getFyQuarterMonths, getPeriodStats,
-    importFromRows, formatValue, formatTarget, progressPct, resetToDefaults, restoreFromBackup, subscribe, getOverviewKpis, setOverviewKpiIds, recomputeKpiYtd,
+    importFromRows, formatValue, formatTarget, progressPct, resetToDefaults, subscribe, getOverviewKpis, setOverviewKpiIds,
   };
 })();
 /**
@@ -950,7 +867,7 @@ const Components = (() => {
               title="${kpi.isKey?'Remove from Key Metrics':'Add to Key Metrics'}"
               style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;
                      color:${kpi.isKey?'var(--brand-accent)':'var(--text-muted)'};transition:color 0.15s;flex-shrink:0">
-        ${kpi.isKey?'★':'☆'}
+        ${kpi.isKey?'<i class="fa-solid fa-star"></i>':'<i class="fa-regular fa-star"></i>'}
       </button>` : '';
 
     return `
@@ -1004,14 +921,10 @@ const Components = (() => {
       </button>`;
 
     const sectionBtn = (section, active) => {
-      const pageId  = 'section:' + encodeURIComponent(section);
-      const sKpis   = DataStore.getKpisBySection(section);
-      const _mode   = settings.reportingPeriod || 'monthly';
-      const counts  = {green:0,amber:0,red:0,neutral:0};
-      sKpis.forEach(k=>{
-        const ps = DataStore.getPeriodStats(k, _mode);
-        counts[ps.rag || k.rag || 'neutral']++;
-      });
+      const pageId = 'section:' + encodeURIComponent(section);
+      const sKpis  = DataStore.getKpisBySection(section);
+      const counts = {green:0,amber:0,red:0,neutral:0};
+      sKpis.forEach(k=>{counts[k.rag||'neutral']++;});
       const redCount   = counts.red;
       const amberCount = counts.amber;
       const indicator  = redCount>0 ? `<span style="margin-left:auto;font-size:9px;background:var(--rag-red-bg);color:var(--rag-red);padding:1px 5px;border-radius:3px">${redCount}✕</span>`
@@ -1077,13 +990,9 @@ const Components = (() => {
   }
 
   // ── RAG Summary Bar ───────────────────────────────────────────────────────
-  function ragSummaryBar(kpis, mode) {
-    const _mode = mode || DataStore.getSettings().reportingPeriod || 'monthly';
+  function ragSummaryBar(kpis) {
     const counts = {green:0,amber:0,red:0,neutral:0};
-    kpis.forEach(k=>{
-      const ps = DataStore.getPeriodStats(k, _mode);
-      counts[ps.rag || k.rag || 'neutral']++;
-    });
+    kpis.forEach(k=>{counts[k.rag||'neutral']++;});
     return `
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
         ${Object.entries(counts).map(([rag,cnt])=>cnt>0?`
@@ -1191,7 +1100,7 @@ const Components = (() => {
 
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary" style="flex:1" onclick="App.openKpiInDataEntry('${kpi.id}');App.closeModal()">⊞ Monthly Data Entry</button>
-            <button class="btn btn-ghost" onclick="App.openEditKpi('${kpi.id}')">✎ Edit KPI</button>
+            <button class="btn btn-ghost" onclick="App.openEditKpi('${kpi.id}');App.closeModal()">✎ Edit KPI</button>
             <button class="btn btn-ghost" onclick="App.closeModal()">Close</button>
           </div>
         </div>
@@ -1228,30 +1137,15 @@ const Components = (() => {
             <input type="text" id="e-who" class="input-field" value="${kpi.who||''}" placeholder="e.g. CPO, COO">
           </div>
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:6px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
             <div>
               <label class="label-sm" style="display:block;margin-bottom:5px">Target / Year</label>
-              <input type="number" id="e-tgt-fy" class="input-field" value="${kpi.targetFY26??''}" placeholder="Annual target" oninput="App.autoCalcAnnual('fy')">
+              <input type="number" id="e-tgt-fy" class="input-field" value="${kpi.targetFY26??''}" placeholder="Annual target" oninput="App.autoCalcAnnual()">
             </div>
             <div>
               <label class="label-sm" style="display:block;margin-bottom:5px">Target / Month</label>
-              <input type="number" id="e-tgt-month" class="input-field" value="${kpi.targetMonth??''}" placeholder="Monthly target" oninput="App.autoCalcAnnual('month')">
+              <input type="number" id="e-tgt-month" class="input-field" value="${kpi.targetMonth??''}" placeholder="Monthly target" oninput="App.autoCalcAnnual()">
             </div>
-          </div>
-          <div style="margin-bottom:12px;padding:8px 10px;background:var(--bg-input);border-radius:8px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-            <span style="font-size:11px;color:var(--text-muted);font-weight:500">Auto-calculate:</span>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-              <input type="radio" name="e-autocalc" id="e-autocalc-none" value="none" ${(kpi.autoCalcTargets||'none')==='none'?'checked':''}
-                     style="accent-color:var(--brand-accent)" onchange="App.autoCalcAnnual('mode')"> Off
-            </label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-              <input type="radio" name="e-autocalc" id="e-autocalc-fy" value="fy_from_month" ${kpi.autoCalcTargets==='fy_from_month'?'checked':''}
-                     style="accent-color:var(--brand-accent)" onchange="App.autoCalcAnnual('mode')"> Year = Month × 12
-            </label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-              <input type="radio" name="e-autocalc" id="e-autocalc-mo" value="month_from_fy" ${kpi.autoCalcTargets==='month_from_fy'?'checked':''}
-                     style="accent-color:var(--brand-accent)" onchange="App.autoCalcAnnual('mode')"> Month = Year ÷ 12
-            </label>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
@@ -1408,22 +1302,17 @@ const Components = (() => {
   function xlsxImportPanel() {
     return `
       <div class="card" style="border:2px dashed var(--brand-accent);background:rgba(0,194,168,0.04);text-align:center;padding:28px">
-        <div style="font-size:28px;margin-bottom:10px">📊</div>
+        <div style="font-size:28px;margin-bottom:10px"><i class="fa-solid fa-chart-bar"></i></div>
         <div style="font-family:var(--font-display);font-size:15px;font-weight:600;margin-bottom:6px">Import XLSX / CSV</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;line-height:1.6">
           Upload a spreadsheet with columns:<br>
-          <strong>A: Metric &nbsp;·&nbsp; B: Who &nbsp;·&nbsp; C: Target FY &nbsp;·&nbsp; D: Target / Month &nbsp;·&nbsp; E: YTD</strong><br>
+          <strong>A: Metric &nbsp;·&nbsp; B: Who &nbsp;·&nbsp; C: Target FY &nbsp;·&nbsp; D: YTD &nbsp;·&nbsp; E: Target Month</strong><br>
           Matching KPIs are updated. New ones are added.
         </div>
         <input type="file" id="xlsx-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="App.handleXlsxUpload(event)">
         <button class="btn btn-primary" onclick="document.getElementById('xlsx-file-input').click()">↑ Choose File</button>
         <div style="font-size:10px;color:var(--text-muted);margin-top:10px">Supports .xlsx, .xls, .csv</div>
       </div>`;
-  }
-
-  // ── Shared utility ────────────────────────────────────────────────────────
-  function _esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
   // ── Formula KPI Modal ─────────────────────────────────────────────────────
@@ -1473,10 +1362,10 @@ const Components = (() => {
 
     const kpiCheckboxes = sourceKpis.length === 0
       ? '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No source KPIs available</div>'
-      : sourceKpis.map((k, i) => {
+      : sourceKpis.map(k => {
           const ps = DataStore.getPeriodStats(k, DataStore.getSettings().reportingPeriod || 'monthly');
           return `
-            <label class="fml-kpi-row" style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background 0.1s;${i>0?'border-top:1px solid var(--border-subtle)':''}"
+            <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:6px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid var(--border-subtle)"
                    onmouseover="this.style.background='var(--bg-card-hover)'" onmouseout="this.style.background='transparent'">
               <input type="checkbox" class="fml-operand-cb" value="${k.id}" ${curIds.includes(k.id)?'checked':''}
                      style="accent-color:var(--brand-accent);width:15px;height:15px;flex-shrink:0;cursor:pointer">
@@ -1544,7 +1433,7 @@ const Components = (() => {
               <div style="display:flex;align-items:center;gap:8px;padding-top:18px">
                 <input type="checkbox" id="fml-iskey" ${kpi?.isKey?'checked':''}
                        style="accent-color:var(--brand-accent);width:15px;height:15px;cursor:pointer">
-                <label for="fml-iskey" class="label-sm" style="cursor:pointer">★ Pin to Overview (Key KPI)</label>
+                <label for="fml-iskey" class="label-sm" style="cursor:pointer"><i class="fa-solid fa-star"></i> Pin to Overview (Key KPI)</label>
               </div>
             </div>
             <div>
@@ -1570,17 +1459,10 @@ const Components = (() => {
                 <button onclick="document.querySelectorAll('.fml-operand-cb').forEach(c=>c.checked=false)" class="btn btn-ghost" style="font-size:10px;padding:3px 8px">None</button>
               </div>
             </div>
-            <div style="position:relative;margin-bottom:8px">
-              <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none">⌕</span>
-              <input type="text" id="fml-kpi-search" class="input-field"
-                     style="padding-left:30px;font-size:12px"
-                     placeholder="Search source KPIs…"
-                     oninput="OverviewPanel._fmlFilterKpis(this.value)">
-            </div>
-            <div id="fml-kpi-list" style="max-height:220px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-card)">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Select the KPIs to include in this formula</div>
+            <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-card)">
               ${kpiCheckboxes}
             </div>
-            <div id="fml-kpi-empty" style="display:none;padding:12px;text-align:center;color:var(--text-muted);font-size:12px">No KPIs match your search</div>
           </div>
 
           <!-- Step 3b: Custom expression (shown when custom) -->
@@ -1592,15 +1474,8 @@ const Components = (() => {
             <input type="text" id="fml-expression" class="input-field" style="font-family:var(--font-mono);font-size:13px;margin-bottom:10px"
                    placeholder="e.g. kpi_1 + kpi_2 - kpi_3 * 0.1"
                    value="${_esc(curExpr)}">
-            <div style="position:relative;margin-bottom:8px">
-              <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none">⌕</span>
-              <input type="text" id="fml-ref-search" class="input-field"
-                     style="padding-left:30px;font-size:12px"
-                     placeholder="Search KPI reference…"
-                     oninput="OverviewPanel._fmlFilterRef(this.value)">
-            </div>
             <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden">
-              <table style="width:100%;border-collapse:collapse" id="fml-ref-table">
+              <table style="width:100%;border-collapse:collapse">
                 <thead>
                   <tr style="background:var(--bg-card)">
                     <th style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--text-muted);text-align:left">KPI ID</th>
@@ -1632,199 +1507,77 @@ const Components = (() => {
   };
 })();
 /**
- * overview-panel.js  v3
+ * overview-panel.js  v1
+ * Replaces Pages.overview() with a rich, customisable dashboard.
  *
- * Changes from v2:
- *  - Per surrounding-card visualization type: 'card' | 'odometer' | 'bar' | 'line'
- *  - Each KPI card has a ••• dropdown to switch its own visualization
- *  - Card viz types stored in overviewPanel.cardVizTypes: { kpiId: 'card'|'odometer'|'bar'|'line' }
- *  - All card viz types render within a single card shell (same size)
- *  - mountCharts() now also mounts per-card mini charts
+ * HERO WIDGET — large central card the client configures:
+ *   • Chart type: odometer | bar | line | pie   (via ••• menu)
+ *   • KPIs included: dropdown + search + checkbox picker
+ *   • Position: centred (standalone) or embedded in the grid
+ *
+ * SURROUNDING CARDS — the normal key-metric KPI cards, arranged around the hero.
+ *
+ * STATE is kept in OverviewPanel (module-level, survives renders because
+ * the render pipeline calls Pages.overview() fresh each time — we persist
+ * state in a settings sub-key via DataStore so it survives page reloads).
  */
 
 const OverviewPanel = (() => {
 
-  // ── State ─────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // State helpers — persisted inside DataStore.getSettings().overviewPanel
+  // ─────────────────────────────────────────────────────────────────────────
   function _getState() {
     const s = DataStore.getSettings();
     return s.overviewPanel || {
-      chartType:     'odometer',
-      heroKpiIds:    [],
-      heroKpiOrder:  [],
-      stackedKpiIds: {},
-      heroPosition:  'center',
-      kpiPickerOpen: false,
-      menuOpen:      false,
-      cardVizTypes:  {},   // { [kpiId]: 'card' | 'odometer' | 'bar' | 'line' }
-      cardMenuOpen:  null, // kpiId whose ••• menu is open, or null
+      chartType:      'odometer',   // 'odometer' | 'bar' | 'line' | 'pie'
+      heroKpiIds:     [],           // KPI ids shown inside the hero card
+      heroPosition:   'center',     // 'center' (full width standalone) | 'grid' (sits in flow)
+      kpiPickerOpen:  false,
+      menuOpen:       false,
     };
   }
 
   function _setState(patch) {
+    const s   = DataStore.getSettings();
     const cur = _getState();
     DataStore.updateSettings({ overviewPanel: { ...cur, ...patch } });
   }
 
-  // ── Drag-and-drop state (module-level, survives re-renders) ──────────────
-  let _dragId     = null;   // id of KPI being dragged
-  let _dragOverId = null;   // id of card currently hovered
-
-  // ── Public API ────────────────────────────────────────────────────────────
-  function setChartType(type) { _setState({ chartType: type, menuOpen: false }); }
-  function toggleMenu()       { _setState({ menuOpen: !_getState().menuOpen }); setTimeout(_fixHeroDropdowns, 0); }
-  function closeMenu()        { _setState({ menuOpen: false }); }
-  function setHeroPosition(p) { _setState({ heroPosition: p, menuOpen: false }); }
-  function toggleKpiPicker()  { _setState({ kpiPickerOpen: !_getState().kpiPickerOpen }); setTimeout(_fixHeroDropdowns, 0); }
-  function closeCollapsedPicker() { _setState({ kpiPickerOpen: false }); }
-
-  // Reposition hero card dropdowns to stay within the viewport
-  function _fixHeroDropdowns() {
-    function _clampDd(ddId, anchorSel, menuW, rightAlign) {
-      const dd  = document.getElementById(ddId);
-      const btn = document.querySelector(anchorSel);
-      if (!dd || !btn) return;
-      const rect = btn.getBoundingClientRect();
-      const w = Math.min(menuW, window.innerWidth - 16);
-      let left = rightAlign ? (rect.right - w) : rect.left;
-      if (left < 8) left = 8;
-      if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
-      dd.style.position  = 'fixed';
-      dd.style.left      = left + 'px';
-      dd.style.right     = 'auto';
-      dd.style.top       = (rect.bottom + 6) + 'px';
-      dd.style.width     = w + 'px';
-      dd.style.transform = 'none';
-    }
-    _clampDd('hero-menu-dropdown',   '#hero-menu-wrap button',   230, true);
-    _clampDd('hero-picker-dropdown', '#hero-picker-wrap button', 320, false);
-    // Collapsed picker: centre on the "+" button
-    const collDd = document.getElementById('hero-collapsed-picker');
-    const collBtn = document.querySelector('.overview-hero-collapsed button');
-    if (collDd && collBtn) {
-      const rect = collBtn.getBoundingClientRect();
-      const w = Math.min(300, window.innerWidth - 16);
-      let left = rect.left + rect.width / 2 - w / 2;
-      if (left < 8) left = 8;
-      if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
-      collDd.style.position  = 'fixed';
-      collDd.style.left      = left + 'px';
-      collDd.style.right     = 'auto';
-      collDd.style.transform = 'none';
-      collDd.style.top       = (rect.bottom + 8) + 'px';
-      collDd.style.width     = w + 'px';
-    }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Public API called from inline handlers
+  // ─────────────────────────────────────────────────────────────────────────
+  function setChartType(type) {
+    _setState({ chartType: type, menuOpen: false });
   }
 
-  // ── Per-card visualization type ───────────────────────────────────────────
-  function setCardVizType(kpiId, type) {
-    const st  = _getState();
-    const map = { ...(st.cardVizTypes || {}) };
-    map[kpiId] = type;
-    _closeCardMenuPortal();
-    _setState({ cardVizTypes: map, cardMenuOpen: null });
-  }
-
-  function _closeCardMenuPortal() {
-    const existing = document.getElementById('_card-viz-portal');
-    if (existing) existing.remove();
-    document.querySelectorAll('.card-viz-menu-btn.open').forEach(b => b.classList.remove('open'));
-  }
-
-  function toggleCardMenu(kpiId, btnEl) {
-    const existing = document.getElementById('_card-viz-portal');
-    if (existing) {
-      const wasKpi = existing.dataset.forKpi === kpiId;
-      _closeCardMenuPortal();
-      if (wasKpi) return;
-    }
-
-    const btn = btnEl || document.querySelector(`[data-kpi-id="${kpiId}"].card-viz-menu-btn`);
-    if (!btn) return;
-    btn.classList.add('open');
-
+  function toggleMenu() {
     const st = _getState();
-    const cardVizTypes = st.cardVizTypes || {};
-    const vizType = cardVizTypes[kpiId] || 'card';
-
-    const vizOptions = [
-      { v:'card',     l:'KPI Card',    i:'⊡' },
-      { v:'odometer', l:'Odometer',    i:'◎' },
-      { v:'bar',      l:'Bar Chart',   i:'▊' },
-      { v:'line',     l:'Line Chart',  i:'∿' },
-    ];
-
-    const rect = btn.getBoundingClientRect();
-    const portal = document.createElement('div');
-    portal.id = '_card-viz-portal';
-    portal.dataset.forKpi = kpiId;
-
-    // Viewport-safe positioning
-    const menuW = 168, menuH = 190;
-    const spaceRight = window.innerWidth - rect.right;
-    const spaceLeft  = rect.left;
-    let hPos;
-    if (spaceRight >= menuW + 8 || spaceRight >= spaceLeft) {
-      // Align right edge of menu to right edge of button, clamped
-      hPos = `right:${Math.max(8, spaceRight)}px`;
-    } else {
-      // Align left edge of menu to left edge of button, clamped
-      hPos = `left:${Math.max(8, Math.min(rect.left, window.innerWidth - menuW - 8))}px`;
-    }
-    const topVal  = (rect.bottom + 4 + menuH > window.innerHeight - 8)
-      ? Math.max(8, rect.top - menuH - 4)
-      : rect.bottom + 4;
-
-    portal.style.cssText = [
-      'position:fixed',
-      `top:${topVal}px`,
-      hPos,
-      'width:168px',
-      'background:var(--bg-modal)',
-      'border:1px solid var(--border-card)',
-      'border-radius:8px',
-      'box-shadow:var(--shadow-modal)',
-      'z-index:99999',
-      'overflow:hidden',
-    ].join(';');
-
-    portal.innerHTML = `
-      <div style="padding:7px 12px;border-bottom:1px solid var(--border-subtle);font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted)">Visualization</div>
-      ${vizOptions.map(o => `
-        <div class="card-viz-option ${vizType===o.v?'active':''}"
-             onclick="event.stopPropagation();OverviewPanel.setCardVizType('${kpiId}','${o.v}')">
-          <span style="font-size:14px;width:16px;text-align:center">${o.i}</span>
-          <span>${o.l}</span>
-          ${vizType===o.v?'<span style="margin-left:auto;font-size:10px;color:var(--brand-accent)">✓</span>':''}
-        </div>`).join('')}`;
-
-    document.body.appendChild(portal);
-
-    const outsideHandler = (e) => {
-      if (!portal.contains(e.target) && !btn.contains(e.target)) {
-        _closeCardMenuPortal();
-        document.removeEventListener('click', outsideHandler, true);
-      }
-    };
-    setTimeout(() => document.addEventListener('click', outsideHandler, true), 0);
+    _setState({ menuOpen: !st.menuOpen });
   }
 
-  function closeCardMenu() {
-    _closeCardMenuPortal();
+  function closeMenu() { _setState({ menuOpen: false }); }
+
+  function toggleKpiPicker() {
+    const st = _getState();
+    _setState({ kpiPickerOpen: !st.kpiPickerOpen });
   }
 
   function toggleHeroKpi(id, checked) {
-    const st    = _getState();
-    let ids     = [...(st.heroKpiIds || [])];
-    let order   = [...(st.heroKpiOrder?.length ? st.heroKpiOrder : ids)];
-    if (checked && !ids.includes(id))  { ids.push(id); order.push(id); }
-    if (!checked) { ids = ids.filter(x => x !== id); order = order.filter(x => x !== id); }
-    _setState({ heroKpiIds: ids, heroKpiOrder: order, kpiPickerOpen: true });
+    const st  = _getState();
+    let ids   = [...(st.heroKpiIds || [])];
+    if (checked && !ids.includes(id)) ids.push(id);
+    if (!checked) ids = ids.filter(x => x !== id);
+    _setState({ heroKpiIds: ids });
   }
 
   function setHeroAllKpis(selected) {
-    const all = DataStore.getKpis();
-    const ids = selected ? all.map(k => k.id) : [];
-    _setState({ heroKpiIds: ids, heroKpiOrder: ids, kpiPickerOpen: true });
+    const allKpis = DataStore.getKpis();
+    _setState({ heroKpiIds: selected ? allKpis.map(k => k.id) : [] });
+  }
+
+  function setHeroPosition(pos) {
+    _setState({ heroPosition: pos });
   }
 
   function filterHeroKpiSearch(q) {
@@ -1837,693 +1590,397 @@ const OverviewPanel = (() => {
     });
   }
 
-  // ── Drag-and-drop handlers (reorder within Key Metrics grid) ─────────────
-  function dndStart(id, ev) {
-    _dragId = id;
-    _dragOverId = null;
-    ev.dataTransfer.effectAllowed = 'move';
-    ev.dataTransfer.setData('text/plain', id);
-    setTimeout(() => {
-      document.querySelector(`[data-dnd-id="${id}"]`)?.classList.add('dnd-dragging');
-    }, 0);
-  }
-
-  function dndEnd() {
-    document.querySelectorAll('.dnd-dragging').forEach(el => el.classList.remove('dnd-dragging'));
-    document.querySelectorAll('.dnd-drop-before').forEach(el => el.classList.remove('dnd-drop-before'));
-    document.getElementById('dnd-zone-grid')?.classList.remove('dnd-zone-active');
-    _dragId = null; _dragOverId = null;
-  }
-
-  function dndOver(targetId, ev) {
-    ev.preventDefault();
-    ev.dataTransfer.dropEffect = 'move';
-    if (_dragOverId === targetId) return;
-    document.querySelector(`[data-dnd-id="${_dragOverId}"]`)?.classList.remove('dnd-drop-before');
-    const gridEl = document.getElementById('dnd-zone-grid');
-    _dragOverId = targetId;
-    if (targetId) {
-      document.querySelector(`[data-dnd-id="${targetId}"]`)?.classList.add('dnd-drop-before');
-      gridEl?.classList.remove('dnd-zone-active');
-    } else {
-      gridEl?.classList.add('dnd-zone-active');
-    }
-  }
-
-  function dndDrop(targetId, ev) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    const draggedId = _dragId;
-    dndEnd();
-    if (!draggedId || !targetId || draggedId === targetId) return;
-
-    const s = DataStore.getSettings();
-    let ids = s.overviewKpiIds
-      ? [...s.overviewKpiIds]
-      : DataStore.getOverviewKpis().map(k => k.id);
-
-    const fromIdx = ids.indexOf(draggedId);
-    const toIdx   = ids.indexOf(targetId);
-    if (fromIdx === -1 || toIdx === -1) return;
-    // Swap the two positions
-    [ids[fromIdx], ids[toIdx]] = [ids[toIdx], ids[fromIdx]];
-    DataStore.setOverviewKpiIds(ids);
-  }
-
-  function moveHeroKpi(id, dir) {
-    const st    = _getState();
-    const ids   = [...(st.heroKpiIds || [])];
-    const order = [...(st.heroKpiOrder?.length ? st.heroKpiOrder : ids)];
-    const i     = order.indexOf(id);
-    if (i < 0) return;
-    const j = dir === 'left' ? i - 1 : i + 1;
-    if (j < 0 || j >= order.length) return;
-    [order[i], order[j]] = [order[j], order[i]];
-    _setState({ heroKpiOrder: order });
-  }
-
-  function openStackPicker(primaryId) {
-    const st      = _getState();
-    const allKpis = DataStore.getKpis();
-    const primary = allKpis.find(k => k.id === primaryId);
-    if (!primary) return;
-    const curStack  = (st.stackedKpiIds || {})[primaryId];
-    const available = allKpis.filter(k => k.id !== primaryId);
-
-    const items = available.length === 0
-      ? '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No other KPIs available</div>'
-      : available.map(k => `
-          <div class="hero-kpi-item" style="cursor:pointer" onclick="OverviewPanel.setStack('${primaryId}','${k.id}')">
-            <div style="flex:1;min-width:0">
-              <div class="hki-name">${_esc(k.metric)}</div>
-              <div class="hki-section">${_esc(k.section)}</div>
-            </div>
-            ${curStack === k.id ? '<span style="color:var(--brand-accent);font-size:14px">✓</span>' : ''}
-          </div>`).join('');
-
-    App.showModal(`
-      <div class="modal-overlay" onclick="if(event.target===this)App.closeModal()">
-        <div class="modal" style="max-width:360px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-            <div>
-              <div style="font-family:var(--font-display);font-size:15px;font-weight:700">Stack a KPI</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Stacked below: ${_esc(primary.metric)}</div>
-            </div>
-            <button onclick="App.closeModal()" style="color:var(--text-muted);font-size:18px;background:none;border:none;cursor:pointer">✕</button>
-          </div>
-          <div id="stack-picker-list" style="max-height:280px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-card)">
-            ${items}
-          </div>
-          ${curStack ? `
-          <button onclick="OverviewPanel.setStack('${primaryId}',null)" class="btn btn-ghost"
-                  style="width:100%;margin-top:10px;font-size:12px;color:var(--rag-red)">
-            ✕ Remove stacked KPI
-          </button>` : ''}
-        </div>
-      </div>`);
-  }
-
-  function setStack(primaryId, stackedId) {
-    const st  = _getState();
-    const map = { ...(st.stackedKpiIds || {}) };
-    if (!stackedId) delete map[primaryId];
-    else map[primaryId] = stackedId;
-    _setState({ stackedKpiIds: map });
-    App.closeModal();
-  }
-
-  function _filterStackList(q) {
-    const list = document.getElementById('stack-picker-list');
-    if (!list) return;
-    const query = q.toLowerCase().trim();
-    list.querySelectorAll('.hero-kpi-item').forEach(item => {
-      const name = item.querySelector('.hki-name')?.textContent?.toLowerCase() || '';
-      item.style.display = (!query || name.includes(query)) ? '' : 'none';
-    });
-  }
-
-  // ── Mount dispatcher ──────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Chart renderers — called post-render via OverviewPanel.mountCharts()
+  // ─────────────────────────────────────────────────────────────────────────
   function mountCharts() {
-    const st         = _getState();
-    const allKpis    = DataStore.getKpis();
-    const heroKpiIds = st.heroKpiIds;
-    const rawKpis    = heroKpiIds === undefined || heroKpiIds === null
-      ? DataStore.getKeyKpis()
-      : heroKpiIds.length > 0
-        ? allKpis.filter(k => heroKpiIds.includes(k.id))
-        : [];
+    const st      = _getState();
+    const heroKpiIds = st.heroKpiIds || [];
+    const allKpis = DataStore.getKpis();
+    const kpis    = heroKpiIds.length > 0
+      ? allKpis.filter(k => heroKpiIds.includes(k.id))
+      : DataStore.getKeyKpis();
 
-    const order = st.heroKpiOrder || [];
-    const kpis  = order.length
-      ? [...rawKpis].sort((a, b) => {
-          const ai = order.indexOf(a.id), bi = order.indexOf(b.id);
-          return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
-        })
-      : rawKpis;
+    if (kpis.length === 0) return;
 
-    const settings = DataStore.getSettings();
-    const mode     = settings.reportingPeriod || 'monthly';
-    const stacks   = st.stackedKpiIds || {};
+    const settings   = DataStore.getSettings();
+    const mode       = settings.reportingPeriod || 'monthly';
 
-    if (kpis.length > 0) {
-      switch (st.chartType) {
-        case 'odometer': _mountOdometers(kpis, mode, settings, stacks, allKpis); break;
-        case 'bar':      _mountBar(kpis, mode);       break;
-        case 'line':     _mountLine(kpis, mode);      break;
-      }
+    switch (st.chartType) {
+      case 'odometer': _mountOdometers(kpis, mode, settings); break;
+      case 'bar':      _mountBar(kpis, mode, settings);       break;
+      case 'line':     _mountLine(kpis, mode, settings);      break;
+      case 'pie':      _mountPie(kpis, mode, settings);       break;
     }
-
-    // Mount per-card mini visualizations
-    _mountCardVizs(st, allKpis, mode);
   }
 
-  // ── Per-card mini visualization mounter ──────────────────────────────────
-  function _mountCardVizs(st, allKpis, mode) {
-    const cardVizTypes = st.cardVizTypes || {};
-    Object.entries(cardVizTypes).forEach(([kpiId, vizType]) => {
-      if (vizType === 'card') return; // standard card, nothing to mount
-      const container = document.getElementById(`card-viz-${kpiId}`);
-      if (!container) return;
-      const kpi = allKpis.find(k => k.id === kpiId);
-      if (!kpi) return;
-
-      switch (vizType) {
-        case 'odometer': _mountCardOdometer(container, kpi, mode); break;
-        case 'bar':      _mountCardBar(container, kpi, mode);      break;
-        case 'line':     _mountCardLine(container, kpi, mode);     break;
-      }
-    });
+  // ── CSS variable reader ──
+  function _cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  function _cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  // ── RAG → colour map ──
   const RAG_COLOR = {
     green:   () => _cssVar('--rag-green')   || '#00C48C',
     amber:   () => _cssVar('--rag-amber')   || '#FF9F1C',
     red:     () => _cssVar('--rag-red')     || '#FF4444',
     neutral: () => _cssVar('--rag-neutral') || '#6B7A99',
   };
-  function _fmt(v, kpi)  { return v === null || v === undefined ? '—' : DataStore.formatValue(v, kpi); }
-  function _shortNum(n)  {
-    const abs = Math.abs(n);
-    if (abs >= 1e9) return (n/1e9).toFixed(1)+'B';
-    if (abs >= 1e6) return (n/1e6).toFixed(1)+'M';
-    if (abs >= 1e3) return (n/1e3).toFixed(0)+'K';
-    return Math.round(n).toString();
-  }
-  function _esc(s) {
-    return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
 
-  // ── Arc geometry helpers ──────────────────────────────────────────────────
-  function _arcPath(cx, cy, r) {
-    const pathD = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`;
-    const circ  = Math.PI * r;
-    return { pathD, circ };
-  }
+  // ─── ODOMETER / GAUGE ────────────────────────────────────────────────────
+  function _mountOdometers(kpis, mode, settings) {
+    const container = document.getElementById('hero-chart-area');
+    if (!container) return;
 
-  // ── CARD MINI: Odometer ───────────────────────────────────────────────────
-  function _mountCardOdometer(container, kpi, mode) {
-    const ps     = DataStore.getPeriodStats(kpi, mode);
-    const actual = ps.actual ?? 0;
-    const target = ps.target ?? (kpi.targetFY26 ?? 1);
-    const rag    = ps.rag || kpi.rag || 'neutral';
-    const color  = RAG_COLOR[rag]?.() || '#6B7A99';
-    const maxV   = Math.max(1, target) / 0.75;
-    const pct    = Math.min(1, Math.max(0, actual / maxV));
+    // Build gauges HTML using the Revmeter-style SVG approach
+    const fmt = (v, kpi) => v === null || v === undefined ? '—' : DataStore.formatValue(v, kpi);
 
-    // Compact layout: value row + SVG gauge, total ~130px
-    const cx = 80, cy = 72, r = 58, sw = 13;
-    const svgW = 160, svgH = 74;
-    const { pathD, circ } = _arcPath(cx, cy, r);
+    const gaugeHtml = kpis.map((kpi, idx) => {
+      const ps      = DataStore.getPeriodStats(kpi, mode);
+      const actual  = ps.actual ?? 0;
+      const target  = ps.target ?? (kpi.targetFY26 ?? 1);
+      const rag     = ps.rag || kpi.rag || 'neutral';
+      const color   = RAG_COLOR[rag]?.() || '#6B7A99';
+      const safeT   = Math.max(1, target);
+      const maxVal  = safeT / 0.75;
+      const displayVal = Math.max(0, Math.min(actual, maxVal));
+      const pct     = displayVal / maxVal;
+      const circumf = 251.3;
+      const offset  = circumf - (pct * circumf);
+      const rotation= pct * 180;
 
-    const tRad = Math.PI * 0.25;
-    const tmx1 = cx + r * Math.cos(tRad),      tmy1 = cy - r * Math.sin(tRad);
-    const tmx2 = cx + (r+8) * Math.cos(tRad),  tmy2 = cy - (r+8) * Math.sin(tRad);
-    const tlx  = cx + (r+17) * Math.cos(tRad), tly  = cy - (r+17) * Math.sin(tRad);
-    const ragBgMap = { green:'rgba(0,196,140,0.15)', amber:'rgba(255,159,28,0.15)', red:'rgba(255,68,68,0.15)', neutral:'rgba(107,122,153,0.15)' };
+      // Target marker angle (75% of arc = target position)
+      const targetAngle = 0.75 * 180; // target sits at 75% of 180° sweep
+      const tx = 100 + 80 * Math.cos((Math.PI - (targetAngle * Math.PI / 180)));
+      const ty = 100 - 80 * Math.sin((targetAngle * Math.PI / 180));
+      const tx2 = 100 + 70 * Math.cos((Math.PI - (targetAngle * Math.PI / 180)));
+      const ty2 = 100 - 70 * Math.sin((targetAngle * Math.PI / 180));
 
-    // RAG + target text sit just below the arc baseline inside SVG
-    const labelH = 32;
-    const ragY   = cy + 10;
+      const isMain = idx === 0 && kpis.length <= 3;
+      const size   = isMain ? 'odo-main' : 'odo-small';
 
-    container.innerHTML = `
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px;padding:0 2px">
-        <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:700;color:${color};line-height:1">${_fmt(ps.actual, kpi)}</div>
-        <div style="font-size:9px;color:var(--text-muted)">/ ${_fmt(target, kpi)}</div>
-      </div>
-      <svg viewBox="0 0 ${svgW} ${svgH + labelH}" style="width:100%;display:block;flex:1;min-height:0;overflow:hidden">
-        <path d="${pathD}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="${sw}" stroke-linecap="round"/>
-        <path d="${pathD}" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="${sw+4}" stroke-dasharray="2 8" stroke-linecap="butt"/>
-        <path id="codo-fill-${kpi.id}" d="${pathD}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round"
-              stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
-              style="transition:stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1);filter:drop-shadow(0 0 4px ${color}66)"/>
-        <line x1="${tmx1.toFixed(1)}" y1="${tmy1.toFixed(1)}" x2="${tmx2.toFixed(1)}" y2="${tmy2.toFixed(1)}"
-              stroke="rgba(255,255,255,0.55)" stroke-width="1.5" stroke-linecap="round"/>
-        <rect x="${(tlx-10).toFixed(1)}" y="${(tly-5).toFixed(1)}" width="20" height="10" rx="2" fill="rgba(0,0,0,0.5)"/>
-        <text x="${tlx.toFixed(1)}" y="${tly.toFixed(1)}" fill="rgba(255,255,255,0.9)" font-size="7" font-weight="700" text-anchor="middle" dominant-baseline="middle">${_shortNum(target)}</text>
-        <line id="codo-needle-${kpi.id}" x1="${cx}" y1="${cy}" x2="${cx - (r+2)}" y2="${cy}"
-              stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round"
-              style="transform-origin:${cx}px ${cy}px;transition:transform 1s cubic-bezier(0.4,0,0.2,1)"/>
-        <circle cx="${cx}" cy="${cy}" r="6" fill="var(--bg-page)" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
-        <circle cx="${cx}" cy="${cy}" r="3" fill="${color}" opacity="0.9"/>
-        <rect x="${(cx-16).toFixed(1)}" y="${(ragY-5).toFixed(1)}" width="32" height="10" rx="2" fill="${ragBgMap[rag]||ragBgMap.neutral}"/>
-        <text x="${cx}" y="${ragY.toFixed(1)}" fill="${color}" font-size="7" font-weight="700" text-anchor="middle" dominant-baseline="middle" letter-spacing="0.08em">${rag.toUpperCase()}</text>
-      </svg>`;
+      return `
+        <div class="odo-block ${size}">
+          <div class="odo-title">${_esc(kpi.metric)}</div>
+          <svg viewBox="0 0 200 115" class="odo-svg">
+            <!-- Track -->
+            <path d="M 20 100 A 80 80 0 0 1 180 100"
+                  fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="14" stroke-linecap="round"/>
+            <!-- Tick marks -->
+            <path d="M 20 100 A 80 80 0 0 1 180 100"
+                  fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="18"
+                  stroke-dasharray="2 14"/>
+            <!-- Fill arc -->
+            <path id="odo-fill-${kpi.id}" d="M 20 100 A 80 80 0 0 1 180 100"
+                  fill="none" stroke="${color}" stroke-width="14" stroke-linecap="round"
+                  stroke-dasharray="${circumf}" stroke-dashoffset="${circumf}"
+                  style="transition:stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1),stroke 0.4s ease"/>
+            <!-- Target marker line -->
+            <line x1="${tx}" y1="${ty}" x2="${tx2}" y2="${ty2}"
+                  stroke="rgba(255,255,255,0.4)" stroke-width="2.5"/>
+            <!-- Needle -->
+            <line id="odo-needle-${kpi.id}" x1="100" y1="100" x2="20" y2="100"
+                  stroke="rgba(255,255,255,0.7)" stroke-width="2.5" stroke-linecap="round"
+                  style="transform-origin:100px 100px;transition:transform 0.9s cubic-bezier(0.4,0,0.2,1)"/>
+            <!-- Centre hub -->
+            <circle cx="100" cy="100" r="7" fill="var(--bg-page)" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+          </svg>
+          <div class="odo-value" style="color:${color}">${fmt(ps.actual, kpi)}</div>
+          <div class="odo-meta">
+            <span>Target: ${fmt(ps.target ?? kpi.targetFY26, kpi)}</span>
+            <span class="odo-rag odo-rag-${rag}">${rag.charAt(0).toUpperCase()+rag.slice(1)}</span>
+          </div>
+          <div class="odo-progress-wrap">
+            <div class="odo-progress-fill" style="width:${ps.progressPct||0}%;background:${color}"></div>
+          </div>
+        </div>`;
+    }).join('');
 
+    container.innerHTML = `<div class="odo-grid">${gaugeHtml}</div>`;
+
+    // Animate after paint
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const fill   = document.getElementById(`codo-fill-${kpi.id}`);
-      const needle = document.getElementById(`codo-needle-${kpi.id}`);
-      if (fill)   fill.style.strokeDashoffset = circ * (1 - pct);
-      if (needle) needle.style.transform       = `rotate(${pct * 180}deg)`;
+      kpis.forEach(kpi => {
+        const ps       = DataStore.getPeriodStats(kpi, mode);
+        const actual   = ps.actual ?? 0;
+        const target   = ps.target ?? (kpi.targetFY26 ?? 1);
+        const safeT    = Math.max(1, target);
+        const maxVal   = safeT / 0.75;
+        const displayV = Math.max(0, Math.min(actual, maxVal));
+        const pct      = displayV / maxVal;
+        const circumf  = 251.3;
+        const offset   = circumf - pct * circumf;
+        const rotation = pct * 180;
+
+        const fillEl   = document.getElementById(`odo-fill-${kpi.id}`);
+        const needleEl = document.getElementById(`odo-needle-${kpi.id}`);
+        if (fillEl)   fillEl.style.strokeDashoffset = offset;
+        if (needleEl) needleEl.style.transform = `rotate(${rotation}deg)`;
+      });
     }));
   }
 
-  // ── CARD MINI: Bar Chart ──────────────────────────────────────────────────
-  function _mountCardBar(container, kpi, mode) {
-    const fyMonths = DataStore.getFyMonths();
-    const ma       = kpi.monthlyActuals || {};
-    const ps       = DataStore.getPeriodStats(kpi, mode);
-    const rag      = ps.rag || kpi.rag || 'neutral';
-    const color    = RAG_COLOR[rag]?.() || '#6B7A99';
-    const tgtMonth = kpi.targetMonth ?? (kpi.targetFY26 ? kpi.targetFY26 / 12 : null);
+  // ─── BAR CHART ────────────────────────────────────────────────────────────
+  function _mountBar(kpis, mode, settings) {
+    const container = document.getElementById('hero-chart-area');
+    if (!container) return;
 
-    const vals    = fyMonths.map(m => ma[m] !== undefined ? parseFloat(ma[m]) : null);
-    const hasData = vals.some(v => v !== null);
+    const W = container.clientWidth || 700;
+    const H = 280;
+    const pad = { top: 24, right: 20, bottom: 60, left: 52 };
+    const chartW = W - pad.left - pad.right;
+    const chartH = H - pad.top - pad.bottom;
 
-    if (!hasData) {
-      container.innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:4px">
-          <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:700;color:${color}">${_fmt(ps.actual, kpi)}</div>
-          <div style="font-size:10px;color:var(--text-muted)">No monthly data yet</div>
-        </div>`;
-      return;
-    }
+    const data = kpis.map(kpi => {
+      const ps = DataStore.getPeriodStats(kpi, mode);
+      return {
+        label:  kpi.metric.length > 14 ? kpi.metric.slice(0, 13) + '…' : kpi.metric,
+        actual: ps.actual ?? 0,
+        target: ps.target ?? kpi.targetFY26 ?? 0,
+        rag:    ps.rag || kpi.rag || 'neutral',
+        unit:   kpi.unit || '',
+      };
+    });
 
-    // Compact: value+target row (20px) + SVG (fills remaining ~110px)
-    const W = 240, H = 96;
-    const pad = { top:4, right:6, bottom:18, left:24 };
-    const cW = W - pad.left - pad.right;
-    const cH = H - pad.top - pad.bottom;
-    const maxV  = Math.max(...vals.filter(v=>v!==null), tgtMonth || 0, 1);
-    const barW  = Math.max(3, (cW / fyMonths.length) - 2);
-    const xStep = cW / fyMonths.length;
-    const yS    = v => cH - (v / maxV) * cH;
+    const maxVal = Math.max(...data.flatMap(d => [d.actual, d.target]), 1);
+    const barW   = Math.min(40, chartW / data.length / 2.5);
+    const groupW = chartW / data.length;
+    const yScale = v => chartH - (v / maxVal) * chartH;
 
-    const tLine = tgtMonth !== null ? (() => {
-      const ty = pad.top + yS(tgtMonth);
-      return `<line x1="${pad.left}" y1="${ty.toFixed(1)}" x2="${W-pad.right}" y2="${ty.toFixed(1)}"
-                    stroke="${color}" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.6"/>`;
-    })() : '';
-
-    const bars = fyMonths.map((m, i) => {
-      const v = vals[i];
-      if (v === null) return '';
-      const bH = Math.max(2, (v / maxV) * cH);
-      const bX = pad.left + i * xStep + (xStep - barW) / 2;
-      const bY = pad.top + yS(v);
-      return `<rect x="${bX.toFixed(1)}" y="${bY.toFixed(1)}" width="${barW.toFixed(1)}" height="${bH.toFixed(1)}"
-                    rx="2" fill="${color}" opacity="0.8"><title>${m}: ${_fmt(v, kpi)}</title></rect>`;
+    // Y axis ticks
+    const ticks = 5;
+    const tickLines = Array.from({ length: ticks + 1 }, (_, i) => {
+      const v = (maxVal / ticks) * i;
+      const y = pad.top + yScale(v);
+      const label = _shortNum(v);
+      return `
+        <line x1="${pad.left}" y1="${y}" x2="${W - pad.right}" y2="${y}"
+              stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        <text x="${pad.left - 6}" y="${y + 4}" fill="rgba(255,255,255,0.3)"
+              font-size="10" text-anchor="end">${label}</text>`;
     }).join('');
 
-    const xLabels = fyMonths.map((m, i) => {
-      if (i % 3 !== 0) return '';
-      const x = pad.left + i * xStep + xStep / 2;
-      return `<text x="${x.toFixed(1)}" y="${(H-3).toFixed(1)}" fill="rgba(255,255,255,0.3)" font-size="6" text-anchor="middle">${m}</text>`;
+    const bars = data.map((d, i) => {
+      const cx     = pad.left + groupW * i + groupW / 2;
+      const color  = RAG_COLOR[d.rag]?.() || '#6B7A99';
+      const aH     = (d.actual / maxVal) * chartH;
+      const tH     = 3; // target line height
+      const ay     = pad.top + yScale(d.actual);
+      const ty     = pad.top + yScale(d.target);
+      const barX   = cx - barW / 2;
+
+      return `
+        <!-- Bar -->
+        <rect class="bar-anim" x="${barX}" y="${ay}" width="${barW}" height="${aH}"
+              rx="3" fill="${color}" opacity="0.85"
+              style="transform-origin:${barX + barW/2}px ${pad.top + chartH}px">
+          <title>${d.label}: ${d.actual}</title>
+        </rect>
+        <!-- Target line -->
+        <rect x="${cx - barW * 0.7}" y="${ty - 1}" width="${barW * 1.4}" height="2.5"
+              rx="1" fill="rgba(255,255,255,0.45)"/>
+        <!-- Label -->
+        <text x="${cx}" y="${pad.top + chartH + 18}" fill="rgba(255,255,255,0.55)"
+              font-size="10" text-anchor="middle">${_esc(d.label)}</text>`;
     }).join('');
 
-    const yTicks = [0, 1].map(f => {
-      const v = maxV * f;
-      const y = pad.top + yS(v);
-      return `<text x="${(pad.left-2).toFixed(1)}" y="${(y+3).toFixed(1)}" fill="rgba(255,255,255,0.25)" font-size="6" text-anchor="end">${_shortNum(v)}</text>
-              <line x1="${pad.left}" y1="${y.toFixed(1)}" x2="${W-pad.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>`;
-    }).join('');
+    const legend = `
+      <div style="display:flex;gap:16px;justify-content:center;margin-top:12px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,0.5)">
+          <div style="width:24px;height:8px;border-radius:2px;background:rgba(255,255,255,0.6)"></div> Target
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,0.5)">
+          <div style="width:14px;height:14px;border-radius:2px;background:var(--rag-green)"></div> On Track
+          <div style="width:14px;height:14px;border-radius:2px;background:var(--rag-amber)"></div> At Risk
+          <div style="width:14px;height:14px;border-radius:2px;background:var(--rag-red)"></div> Off Track
+        </div>
+      </div>`;
 
     container.innerHTML = `
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px;padding:0 2px;flex-shrink:0">
-        <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:700;color:${color}">${_fmt(ps.actual, kpi)}</div>
-        ${tgtMonth !== null ? `<div style="font-size:9px;color:var(--text-muted)">Target ${_fmt(tgtMonth, kpi)}/mo</div>` : ''}
-      </div>
-      <svg viewBox="0 0 ${W} ${H}" style="width:100%;flex:1;min-height:0;display:block;overflow:hidden">
-        ${yTicks}${tLine}${bars}${xLabels}
-      </svg>`;
+      <svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" style="overflow:visible">
+        ${tickLines}
+        ${bars}
+      </svg>
+      ${legend}`;
+
+    // Animate bars in
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      container.querySelectorAll('.bar-anim').forEach((el, i) => {
+        el.style.transition = `transform 0.7s cubic-bezier(0.4,0,0.2,1) ${i * 0.07}s, opacity 0.4s ease ${i * 0.07}s`;
+        el.style.opacity = '0.85';
+      });
+    }));
   }
 
-  // ── CARD MINI: Line Chart ─────────────────────────────────────────────────
-  function _mountCardLine(container, kpi, mode) {
+  // ─── LINE CHART ───────────────────────────────────────────────────────────
+  function _mountLine(kpis, mode, settings) {
+    const container = document.getElementById('hero-chart-area');
+    if (!container) return;
+
     const fyMonths = DataStore.getFyMonths();
-    const ma       = kpi.monthlyActuals || {};
-    const ps       = DataStore.getPeriodStats(kpi, mode);
-    const rag      = ps.rag || kpi.rag || 'neutral';
-    const color    = RAG_COLOR[rag]?.() || '#6B7A99';
-    const tgtMonth = kpi.targetMonth ?? (kpi.targetFY26 ? kpi.targetFY26 / 12 : null);
+    const W = container.clientWidth || 700;
+    const H = 280;
+    const pad = { top: 24, right: 24, bottom: 50, left: 52 };
+    const chartW = W - pad.left - pad.right;
+    const chartH = H - pad.top - pad.bottom;
 
-    const vals   = fyMonths.map(m => ma[m] !== undefined ? parseFloat(ma[m]) : null);
-    const points = fyMonths.map((m, i) => ({ m, v: vals[i], i })).filter(p => p.v !== null);
+    // Collect all monthly actuals across the selected KPIs
+    const allVals = kpis.flatMap(kpi =>
+      fyMonths.map(m => kpi.monthlyActuals?.[m]).filter(v => v !== undefined && v !== null)
+    ).map(Number);
 
-    if (points.length < 2) {
-      container.innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:4px">
-          <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:700;color:${color}">${_fmt(ps.actual, kpi)}</div>
-          <div style="font-size:10px;color:var(--text-muted)">Need ≥2 months of data</div>
-        </div>`;
-      return;
-    }
+    const maxVal = Math.max(...allVals, 1);
+    const xStep  = chartW / Math.max(fyMonths.length - 1, 1);
+    const yScale = v => chartH - (v / maxVal) * chartH;
 
-    const W = 240, H = 96;
-    const pad  = { top:4, right:6, bottom:18, left:24 };
-    const cW   = W - pad.left - pad.right;
-    const cH   = H - pad.top - pad.bottom;
-    const allV = [...points.map(p => p.v), tgtMonth !== null ? tgtMonth : 0];
-    const minV = Math.min(0, ...allV);
-    const maxV = Math.max(...allV, 1);
-    const range = maxV - minV || 1;
-    const xStep = cW / (fyMonths.length - 1);
-    const yS = v => cH - ((v - minV) / range) * cH;
+    // Grid
+    const gridLines = Array.from({ length: 5 }, (_, i) => {
+      const v = (maxVal / 4) * i;
+      const y = pad.top + yScale(v);
+      return `
+        <line x1="${pad.left}" y1="${y}" x2="${W - pad.right}" y2="${y}"
+              stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        <text x="${pad.left - 6}" y="${y + 4}" fill="rgba(255,255,255,0.3)"
+              font-size="10" text-anchor="end">${_shortNum(v)}</text>`;
+    }).join('');
 
-    const coordPts = points.map(p => ({ x: pad.left + p.i * xStep, y: pad.top + yS(p.v) }));
-    const lineD = coordPts.map((p, i) => `${i===0?'M':'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-    const areaD = coordPts.length > 1
-      ? `${lineD} L ${coordPts[coordPts.length-1].x.toFixed(1)} ${(pad.top+cH).toFixed(1)} L ${coordPts[0].x.toFixed(1)} ${(pad.top+cH).toFixed(1)} Z`
-      : '';
-
-    const tLine = tgtMonth !== null ? (() => {
-      const ty = pad.top + yS(tgtMonth);
-      return `<line x1="${pad.left}" y1="${ty.toFixed(1)}" x2="${W-pad.right}" y2="${ty.toFixed(1)}"
-                    stroke="${color}" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.5"/>`;
-    })() : '';
-
+    // X labels
     const xLabels = fyMonths.map((m, i) => {
-      if (i % 3 !== 0) return '';
       const x = pad.left + i * xStep;
-      return `<text x="${x.toFixed(1)}" y="${(H-3).toFixed(1)}" fill="rgba(255,255,255,0.3)" font-size="6" text-anchor="middle">${m}</text>`;
+      const show = fyMonths.length <= 12 || i % 2 === 0;
+      return show ? `<text x="${x}" y="${pad.top + chartH + 16}" fill="rgba(255,255,255,0.35)"
+                           font-size="10" text-anchor="middle">${m}</text>` : '';
     }).join('');
 
-    const yTicks = [0, 1].map(f => {
-      const v = minV + range * f;
-      const y = pad.top + yS(v);
-      return `<text x="${(pad.left-2).toFixed(1)}" y="${(y+3).toFixed(1)}" fill="rgba(255,255,255,0.25)" font-size="6" text-anchor="end">${_shortNum(v)}</text>
-              <line x1="${pad.left}" y1="${y.toFixed(1)}" x2="${W-pad.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>`;
-    }).join('');
+    // Series lines
+    const PALETTE = ['#00C2A8','#3A86FF','#FF9F1C','#FF4444','#A78BFA','#34D399'];
+    const lines = kpis.map((kpi, ki) => {
+      const color  = PALETTE[ki % PALETTE.length];
+      const points = fyMonths
+        .map((m, i) => {
+          const v = kpi.monthlyActuals?.[m];
+          return v !== undefined && v !== null ? { x: pad.left + i * xStep, y: pad.top + yScale(Number(v)) } : null;
+        })
+        .filter(Boolean);
 
-    const dots = coordPts.map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2" fill="${color}" opacity="0.9"/>`).join('');
+      if (points.length < 2) return '';
+      const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
 
-    container.innerHTML = `
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px;padding:0 2px;flex-shrink:0">
-        <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:700;color:${color}">${_fmt(ps.actual, kpi)}</div>
-        ${tgtMonth !== null ? `<div style="font-size:9px;color:var(--text-muted)">Target ${_fmt(tgtMonth, kpi)}/mo</div>` : ''}
-      </div>
-      <svg viewBox="0 0 ${W} ${H}" style="width:100%;flex:1;min-height:0;display:block;overflow:hidden">
+      // Area fill
+      const areaD = `${d} L ${points[points.length-1].x} ${pad.top + chartH} L ${points[0].x} ${pad.top + chartH} Z`;
+
+      return `
         <defs>
-          <linearGradient id="clg-${kpi.id}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="${color}" stop-opacity="0.20"/>
+          <linearGradient id="lg-${ki}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${color}" stop-opacity="0.25"/>
             <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
           </linearGradient>
         </defs>
-        ${yTicks}
-        ${areaD ? `<path d="${areaD}" fill="url(#clg-${kpi.id})"/>` : ''}
-        <path d="${lineD}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-        ${dots}
-        ${tLine}${xLabels}
-      </svg>`;
-  }
-
-  // ── HERO: Concentric gauge ────────────────────────────────────────────────
-  function _buildConcentricGauge(primaryKpi, stackedKpi, mode) {
-    // Fixed SVG canvas — arc perfectly centred, all elements inside viewBox, nothing clips
-    const svgW = 280, svgH = 220;
-    const cx = svgW / 2;  // 140 — horizontally centred
-    const cy = 140;       // arc baseline Y — labels go below
-
-    const rOuter = 98, rInner = rOuter - 28;
-    const swOuter = 20,  swInner = 16;
-
-    const psP     = DataStore.getPeriodStats(primaryKpi, mode);
-    const actP    = psP.actual  ?? 0;
-    const tgtP    = psP.target  ?? (primaryKpi.targetFY26 ?? 1);
-    const ragP    = psP.rag || primaryKpi.rag || 'neutral';
-    const colP    = RAG_COLOR[ragP]?.() || '#6B7A99';
-    const maxP    = Math.max(1, tgtP) / 0.75;
-    const pctP    = Math.min(1, Math.max(0, actP / maxP));
-    const { pathD: outerPath, circ: circOuter } = _arcPath(cx, cy, rOuter);
-
-    let actS = 0, tgtS = 0, ragS = 'neutral', colS = '#6B7A99', pctS = 0, circInner = 0, innerPath = '';
-    if (stackedKpi) {
-      const psS = DataStore.getPeriodStats(stackedKpi, mode);
-      actS  = psS.actual ?? 0;
-      tgtS  = psS.target ?? (stackedKpi.targetFY26 ?? 1);
-      ragS  = psS.rag || stackedKpi.rag || 'neutral';
-      colS  = RAG_COLOR[ragS]?.() || '#6B7A99';
-      const maxS = Math.max(1, tgtS) / 0.75;
-      pctS  = Math.min(1, Math.max(0, actS / maxS));
-      const inner = _arcPath(cx, cy, rInner);
-      circInner = inner.circ;
-      innerPath = inner.pathD;
-    }
-
-    const needleLenP = rOuter + 4;
-    const needleLenS = rInner - 4;
-    const tRad = Math.PI * 0.25;
-    const tmx1 = cx + rOuter * Math.cos(tRad),        tmy1 = cy - rOuter * Math.sin(tRad);
-    const tmx2 = cx + (rOuter + 10) * Math.cos(tRad), tmy2 = cy - (rOuter + 10) * Math.sin(tRad);
-    const tlx  = cx + (rOuter + 22) * Math.cos(tRad), tly  = cy - (rOuter + 22) * Math.sin(tRad);
-    const tmix1 = cx + rInner * Math.cos(tRad),         tmiy1 = cy - rInner * Math.sin(tRad);
-    const tmix2 = cx + (rInner - 10) * Math.cos(tRad), tmiy2 = cy - (rInner - 10) * Math.sin(tRad);
-    const tlix  = cx + (rInner + 22) * Math.cos(tRad), tliy  = cy - (rInner + 22) * Math.sin(tRad);
-
-    const hubR = 16, hubInnerR = 5;
-    const ragColor = { green:'#00C48C', amber:'#FF9F1C', red:'#FF4444', neutral:'#6B7A99' };
-    const ragBg    = { green:'rgba(0,196,140,0.15)', amber:'rgba(255,159,28,0.15)', red:'rgba(255,68,68,0.15)', neutral:'rgba(107,122,153,0.15)' };
-    const colPRag = ragColor[ragP] || '#6B7A99';
-    const bgPRag  = ragBg[ragP]   || 'rgba(107,122,153,0.15)';
-    const colSRag = ragColor[ragS] || '#6B7A99';
-    const bgSRag  = ragBg[ragS]   || 'rgba(107,122,153,0.15)';
-    const ragW = 52, ragH = 16, ragRr = 4;
-    const ragY1      = cy + hubR + 12;
-    const ragY2name  = ragY1 + 22;
-    const ragY2val   = ragY1 + 40;
-    const ragY2badge = ragY1 + 56;
-
-    const stackBtnSvg = `
-      <g class="odo-hub-btn" onclick="OverviewPanel.openStackPicker('${primaryKpi.id}')"
-         style="cursor:pointer" title="${stackedKpi ? 'Change stacked KPI' : 'Stack a KPI'}">
-        <circle cx="${cx}" cy="${cy}" r="${hubR}" fill="var(--bg-page)"
-                stroke="${stackedKpi ? colS : 'rgba(255,255,255,0.15)'}" stroke-width="1.5"
-                class="odo-hub-ring"/>
-        <circle cx="${cx}" cy="${cy}" r="${hubInnerR}" fill="${colP}" opacity="0.9"/>
-        ${stackedKpi ? `<circle cx="${cx}" cy="${cy}" r="2.5" fill="${colS}" opacity="0.95"/>` : ''}
-        <text x="${cx}" y="${cy}" fill="rgba(255,255,255,0.55)" font-size="11"
-              font-weight="700" text-anchor="middle" dominant-baseline="middle"
-              class="odo-hub-plus" style="pointer-events:none;user-select:none">⊕</text>
-      </g>`;
-
-    return `
-      <div class="odo-block" id="odo-wrap-${primaryKpi.id}">
-        <div style="text-align:center;margin-bottom:4px;flex-shrink:0;padding:0 8px">
-          <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:2px;white-space:normal;word-break:break-word;line-height:1.3">${_esc(primaryKpi.metric)}</div>
-          <div style="font-family:var(--font-display);font-weight:700;font-size:1.8rem;color:${colP};letter-spacing:-0.5px;line-height:1" id="odo-val-primary-${primaryKpi.id}">${_fmt(psP.actual, primaryKpi)}</div>
-        </div>
-        <div style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center">
-          <svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%;max-height:100%;overflow:visible;display:block">
-            <path d="${outerPath}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="${swOuter}" stroke-linecap="round"/>
-            <path d="${outerPath}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="${swOuter+4}" stroke-dasharray="2 10" stroke-linecap="butt"/>
-            <path id="odo-fill-${primaryKpi.id}" d="${outerPath}" fill="none" stroke="${colP}" stroke-width="${swOuter}" stroke-linecap="round"
-                  stroke-dasharray="${circOuter}" stroke-dashoffset="${circOuter}"
-                  style="transition:stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1);filter:drop-shadow(0 0 6px ${colP}66)"/>
-            <path id="odo-glow-${primaryKpi.id}" d="${outerPath}" fill="none" stroke="${colP}" stroke-width="3" stroke-linecap="round" opacity="0.15"
-                  stroke-dasharray="${circOuter}" stroke-dashoffset="${circOuter}"
-                  style="transition:stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1)"/>
-            <line x1="${tmx1.toFixed(1)}" y1="${tmy1.toFixed(1)}" x2="${tmx2.toFixed(1)}" y2="${tmy2.toFixed(1)}"
-                  stroke="rgba(255,255,255,0.7)" stroke-width="2.5" stroke-linecap="round"/>
-            <rect x="${(tlx-14).toFixed(1)}" y="${(tly-7).toFixed(1)}" width="28" height="14" rx="3" fill="rgba(0,0,0,0.55)"/>
-            <text x="${tlx.toFixed(1)}" y="${tly.toFixed(1)}" fill="rgba(255,255,255,0.95)" font-size="9" font-weight="700" text-anchor="middle" dominant-baseline="middle">${_shortNum(tgtP)}</text>
-            ${stackedKpi ? `
-            <path d="${innerPath}" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="${swInner}" stroke-linecap="round"/>
-            <path d="${innerPath}" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="${swInner+4}" stroke-dasharray="2 9" stroke-linecap="butt"/>
-            <path id="odo-fill-${stackedKpi.id}" d="${innerPath}" fill="none" stroke="${colS}" stroke-width="${swInner}" stroke-linecap="round"
-                  stroke-dasharray="${circInner}" stroke-dashoffset="${circInner}"
-                  style="transition:stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1);filter:drop-shadow(0 0 5px ${colS}55)"/>
-            <line x1="${tmix1.toFixed(1)}" y1="${tmiy1.toFixed(1)}" x2="${tmix2.toFixed(1)}" y2="${tmiy2.toFixed(1)}"
-                  stroke="rgba(255,255,255,0.6)" stroke-width="2" stroke-linecap="round"/>
-            <rect x="${(tlix-13).toFixed(1)}" y="${(tliy-6).toFixed(1)}" width="26" height="12" rx="3" fill="rgba(0,0,0,0.55)"/>
-            <text x="${tlix.toFixed(1)}" y="${tliy.toFixed(1)}" fill="rgba(255,255,255,0.95)" font-size="8" font-weight="700" text-anchor="middle" dominant-baseline="middle">${_shortNum(tgtS)}</text>
-            ` : ''}
-            <line id="odo-needle-${primaryKpi.id}" x1="${cx}" y1="${cy}" x2="${cx - needleLenP}" y2="${cy}"
-                  stroke="rgba(255,255,255,0.92)" stroke-width="3" stroke-linecap="round"
-                  style="transform-origin:${cx}px ${cy}px;transition:transform 1s cubic-bezier(0.4,0,0.2,1)"/>
-            ${stackedKpi ? `
-            <line id="odo-needle-stacked-${stackedKpi.id}" x1="${cx}" y1="${cy}" x2="${cx - needleLenS}" y2="${cy}"
-                  stroke="${colS}" stroke-width="2.5" stroke-linecap="round" opacity="0.9"
-                  style="transform-origin:${cx}px ${cy}px;transition:transform 1s cubic-bezier(0.4,0,0.2,1)"/>
-            ` : ''}
-            ${stackBtnSvg}
-            <rect x="${(cx - ragW/2).toFixed(1)}" y="${(ragY1 - ragH/2).toFixed(1)}" width="${ragW}" height="${ragH}" rx="${ragRr}" fill="${bgPRag}"/>
-            <text x="${cx}" y="${ragY1}" fill="${colPRag}" font-size="9" font-weight="700" text-anchor="middle" dominant-baseline="middle" letter-spacing="0.08em">${ragP.toUpperCase()}</text>
-            ${stackedKpi ? `
-            <text x="${cx}" y="${ragY2name.toFixed(1)}" fill="rgba(255,255,255,0.4)" font-size="8" font-weight="700" text-anchor="middle" dominant-baseline="middle" letter-spacing="0.08em">${_esc(stackedKpi.metric).toUpperCase().slice(0,22)}</text>
-            <text x="${cx}" y="${ragY2val.toFixed(1)}" fill="${colS}" font-size="14" font-weight="700" text-anchor="middle" dominant-baseline="middle" letter-spacing="-0.3px">${_fmt(actS, stackedKpi)}</text>
-            <rect x="${(cx - ragW/2).toFixed(1)}" y="${(ragY2badge - ragH/2).toFixed(1)}" width="${ragW}" height="${ragH}" rx="${ragRr}" fill="${bgSRag}"/>
-            <text x="${cx}" y="${ragY2badge.toFixed(1)}" fill="${colSRag}" font-size="9" font-weight="700" text-anchor="middle" dominant-baseline="middle" letter-spacing="0.08em">${ragS.toUpperCase()}</text>
-            ` : ''}
-          </svg>
-        </div>
-      </div>`;
-  }
-
-  // ── HERO: Odometer mount ──────────────────────────────────────────────────
-  function _mountOdometers(kpis, mode, settings, stacks, allKpis) {
-    const container = document.getElementById('hero-chart-area');
-    if (!container) return;
-    const n = kpis.length;
-    const cols = kpis.map((kpi, idx) => {
-      const stackedId = stacks[kpi.id];
-      const stacked   = stackedId ? allKpis.find(k => k.id === stackedId) : null;
-      const canLeft   = idx > 0, canRight = idx < n - 1;
-      return `
-        <div class="odo-col" data-kpi-id="${kpi.id}">
-          <div class="odo-reorder-btns">
-            <button class="odo-move-btn" ${canLeft?'':'disabled'} onclick="OverviewPanel.moveHeroKpi('${kpi.id}','left')">◂</button>
-            <span class="odo-pos-label">${idx+1}/${n}</span>
-            <button class="odo-move-btn" ${canRight?'':'disabled'} onclick="OverviewPanel.moveHeroKpi('${kpi.id}','right')">▸</button>
-          </div>
-          ${_buildConcentricGauge(kpi, stacked, mode)}
-        </div>`;
+        <path d="${areaD}" fill="url(#lg-${ki})"/>
+        <path d="${d}" fill="none" stroke="${color}" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round" class="line-path"/>
+        ${points.map(p => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="${color}" opacity="0.9"/>`).join('')}`;
     }).join('');
-    container.innerHTML = `<div class="odo-row">${cols}</div>`;
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      kpis.forEach(kpi => {
-        const stackedId = stacks[kpi.id];
-        const stacked   = stackedId ? allKpis.find(k => k.id === stackedId) : null;
-        const psP    = DataStore.getPeriodStats(kpi, mode);
-        const actP   = psP.actual ?? 0;
-        const tgtP   = psP.target ?? (kpi.targetFY26 ?? 1);
-        const maxP   = Math.max(1, tgtP) / 0.75;
-        const pctP   = Math.min(1, Math.max(0, actP / maxP));
-        const fillP  = document.getElementById(`odo-fill-${kpi.id}`);
-        const glowP  = document.getElementById(`odo-glow-${kpi.id}`);
-        const needle = document.getElementById(`odo-needle-${kpi.id}`);
-        if (fillP)  { const c = parseFloat(fillP.getAttribute('stroke-dasharray')); fillP.style.strokeDashoffset = c * (1 - pctP); }
-        if (glowP)  { const c = parseFloat(glowP.getAttribute('stroke-dasharray')); glowP.style.strokeDashoffset = c * (1 - pctP); }
-        if (needle) needle.style.transform = `rotate(${pctP * 180}deg)`;
-        if (stacked) {
-          const psS = DataStore.getPeriodStats(stacked, mode);
-          const actS = psS.actual ?? 0; const tgtS = psS.target ?? (stacked.targetFY26 ?? 1);
-          const maxS = Math.max(1, tgtS) / 0.75; const pctS = Math.min(1, Math.max(0, actS / maxS));
-          const fillS   = document.getElementById(`odo-fill-${stacked.id}`);
-          const needleS = document.getElementById(`odo-needle-stacked-${stacked.id}`);
-          if (fillS) { const c = parseFloat(fillS.getAttribute('stroke-dasharray')); fillS.style.strokeDashoffset = c * (1 - pctS); }
-          if (needleS) needleS.style.transform = `rotate(${pctS * 180}deg)`;
-        }
-      });
-    }));
-  }
 
-  // ── HERO: Bar Chart ───────────────────────────────────────────────────────
-  function _mountBar(kpis, mode) {
-    const container = document.getElementById('hero-chart-area');
-    if (!container) return;
-    const W = container.clientWidth || 700, H = 300;
-    const pad = { top:24, right:20, bottom:76, left:52 };
-    const cW = W - pad.left - pad.right, cH = H - pad.top - pad.bottom;
-    const data = kpis.map(kpi => {
-      const ps = DataStore.getPeriodStats(kpi, mode);
-      // Split label into up to 2 lines of ~16 chars each
-      const words = kpi.metric.split(' ');
-      const lines = []; let cur = '';
-      words.forEach(w => {
-        if ((cur + (cur?' ':'')+w).length <= 16) { cur += (cur?' ':'')+w; }
-        else { if (cur) lines.push(cur); cur = w.length>16?w.slice(0,15)+'…':w; }
-      });
-      if (cur) lines.push(cur);
-      return { lines: lines.slice(0,2), actual: ps.actual??0, target: ps.target??kpi.targetFY26??0, rag: ps.rag||kpi.rag||'neutral' };
-    });
-    const maxVal = Math.max(...data.flatMap(d=>[d.actual,d.target]), 1);
-    const groupW = cW / data.length, barW = Math.min(44, groupW * 0.5);
-    const yS = v => cH - (v / maxVal) * cH;
-    const ticks = Array.from({length:6},(_,i)=>{
-      const v=(maxVal/5)*i, y=pad.top+yS(v);
-      return `<line x1="${pad.left}" y1="${y}" x2="${W-pad.right}" y2="${y}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-              <text x="${pad.left-6}" y="${y+4}" fill="rgba(255,255,255,0.3)" font-size="10" text-anchor="end">${_shortNum(v)}</text>`;
-    }).join('');
-    const bars = data.map((d,i)=>{
-      const cx=pad.left+groupW*i+groupW/2, color=RAG_COLOR[d.rag]?.()||'#6B7A99';
-      const aH=Math.max(2,(d.actual/maxVal)*cH), ay=pad.top+yS(d.actual), ty=pad.top+yS(d.target);
-      const labelY = pad.top+cH+16;
-      const labelLines = d.lines.map((ln, li) =>
-        `<text x="${cx.toFixed(1)}" y="${(labelY + li*13).toFixed(1)}" fill="rgba(255,255,255,0.55)" font-size="10" text-anchor="middle">${_esc(ln)}</text>`
-      ).join('');
-      return `<rect x="${(cx-barW/2).toFixed(1)}" y="${ay.toFixed(1)}" width="${barW}" height="${aH.toFixed(1)}" rx="3" fill="${color}" opacity="0.85"/>
-              <rect x="${(cx-barW*0.8).toFixed(1)}" y="${(ty-1.5).toFixed(1)}" width="${(barW*1.6).toFixed(1)}" height="3" rx="1.5" fill="rgba(255,255,255,0.6)"/>
-              ${labelLines}`;
-    }).join('');
-    container.innerHTML = `<svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" style="overflow:visible">${ticks}${bars}</svg>`;
-  }
-
-  // ── HERO: Line Chart ──────────────────────────────────────────────────────
-  function _mountLine(kpis, mode) {
-    const container = document.getElementById('hero-chart-area');
-    if (!container) return;
-    const fyMonths = DataStore.getFyMonths();
-    const W = container.clientWidth || 700, H = 260;
-    const pad = { top:28, right:90, bottom:52, left:58 };
-    const cW = W - pad.left - pad.right, cH = H - pad.top - pad.bottom;
-    const allVals = kpis.flatMap(kpi => {
-      const mvs = fyMonths.map(m=>kpi.monthlyActuals?.[m]).filter(v=>v!=null).map(Number);
-      const tgt = kpi.targetMonth??kpi.targetFY26;
-      return tgt!=null?[...mvs,Number(tgt)]:mvs;
-    });
-    if (allVals.length === 0) {
-      container.innerHTML = `<div style="text-align:center;padding:48px;color:var(--text-muted);font-size:13px">No monthly data yet</div>`;
-      return;
-    }
-    const minVal=Math.min(0,...allVals), maxVal=Math.max(...allVals,1), range=maxVal-minVal||1;
-    const yS = v => cH - ((v-minVal)/range)*cH;
-    const xStep = cW / Math.max(fyMonths.length-1,1);
-    const grid = Array.from({length:6},(_,i)=>{
-      const v=minVal+(range/5)*i, y=pad.top+yS(v);
-      return `<line x1="${pad.left}" y1="${y.toFixed(1)}" x2="${W-pad.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-              <text x="${(pad.left-8).toFixed(1)}" y="${(y+4).toFixed(1)}" fill="rgba(255,255,255,0.3)" font-size="10" text-anchor="end">${_shortNum(v)}</text>`;
-    }).join('');
-    const xLabels = fyMonths.map((m,i)=>{
-      const x=pad.left+i*xStep;
-      return `<text x="${x.toFixed(1)}" y="${(pad.top+cH+16).toFixed(1)}" fill="rgba(255,255,255,0.35)" font-size="10" text-anchor="middle">${m}</text>`;
-    }).join('');
-    const PALETTE = ['#00C2A8','#3A86FF','#FF9F1C','#FF4444','#A78BFA','#34D399'];
-    const series = kpis.map((kpi,ki)=>{
-      const color=PALETTE[ki%PALETTE.length];
-      const points=fyMonths.map((m,i)=>{const v=kpi.monthlyActuals?.[m];return v!=null?{x:pad.left+i*xStep,y:pad.top+yS(Number(v))}:null;}).filter(Boolean);
-      const pathD=points.length>1?points.map((p,i)=>`${i===0?'M':'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' '):'';
-      const areaD=pathD?`${pathD} L ${points[points.length-1].x.toFixed(1)} ${(pad.top+cH).toFixed(1)} L ${points[0].x.toFixed(1)} ${(pad.top+cH).toFixed(1)} Z`:'';
-      const tgtVal=kpi.targetMonth??kpi.targetFY26;
-      let targetSvg='';
-      if(tgtVal!=null){const ty=pad.top+yS(Number(tgtVal));const tLabel=DataStore.formatValue(Number(tgtVal),kpi);targetSvg=`<line x1="${pad.left}" y1="${ty.toFixed(1)}" x2="${(W-pad.right).toFixed(1)}" y2="${ty.toFixed(1)}" stroke="${color}" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.65"/><text x="${(W-pad.right+9).toFixed(1)}" y="${(ty+5).toFixed(1)}" fill="${color}" font-size="10" font-weight="600" opacity="0.95">${_esc(tLabel)}</text>`;}
-      const dots=points.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="${color}" opacity="0.9"/>`).join('');
-      return `<defs><linearGradient id="lg-${ki}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.18"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>${areaD?`<path d="${areaD}" fill="url(#lg-${ki})"/>`:''}${pathD?`<path d="${pathD}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`:''} ${dots}${targetSvg}`;
-    }).join('');
+    // Legend
     const legend = kpis.map((kpi, ki) => {
       const color = PALETTE[ki % PALETTE.length];
-      // Split into up to 2 lines matching bar chart logic
-      const words = kpi.metric.split(' ');
-      const lines = []; let cur = '';
-      words.forEach(w => {
-        if ((cur + (cur?' ':'')+w).length <= 16) { cur += (cur?' ':'')+w; }
-        else { if (cur) lines.push(cur); cur = w.length>16?w.slice(0,15)+'…':w; }
-      });
-      if (cur) lines.push(cur);
-      const linesHtml = lines.slice(0,2).map(ln => `<div>${_esc(ln)}</div>`).join('');
-      return `<div style="display:flex;align-items:flex-start;gap:5px;font-size:11px;color:rgba(255,255,255,0.6);min-width:0;flex-shrink:1">
-        <div style="width:14px;height:3px;border-radius:2px;background:${color};flex-shrink:0;margin-top:5px"></div>
-        <div style="line-height:1.4">${linesHtml}</div>
+      return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,0.6)">
+        <div style="width:20px;height:3px;border-radius:2px;background:${color}"></div>${_esc(kpi.metric)}
       </div>`;
     }).join('');
+
     container.innerHTML = `
-      <div style="display:flex;flex-direction:column;width:100%;height:100%">
-        <svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" style="overflow:visible;flex-shrink:0">${grid}${xLabels}${series}</svg>
-        <div style="display:flex;flex-wrap:wrap;gap:8px 16px;padding:4px 8px 2px;justify-content:center">${legend}</div>
+      <svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" style="overflow:visible">
+        ${gridLines}${xLabels}${lines}
+      </svg>
+      <div style="display:flex;gap:14px;justify-content:center;margin-top:10px;flex-wrap:wrap">${legend}</div>`;
+  }
+
+  // ─── PIE / DONUT CHART ────────────────────────────────────────────────────
+  function _mountPie(kpis, mode, settings) {
+    const container = document.getElementById('hero-chart-area');
+    if (!container) return;
+
+    const mode2 = DataStore.getSettings().reportingPeriod || 'monthly';
+    const data = kpis.map((kpi, i) => {
+      const ps = DataStore.getPeriodStats(kpi, mode2);
+      return {
+        label:  kpi.metric,
+        value:  Math.max(0, ps.actual ?? kpi.ytd ?? 0),
+        rag:    ps.rag || kpi.rag || 'neutral',
+      };
+    }).filter(d => d.value > 0);
+
+    if (data.length === 0) {
+      container.innerHTML = `<div style="text-align:center;color:rgba(255,255,255,0.3);padding:40px">No data available for pie chart</div>`;
+      return;
+    }
+
+    const PALETTE = ['#00C2A8','#3A86FF','#FF9F1C','#FF4444','#A78BFA','#34D399','#F472B6','#FB923C'];
+    const total = data.reduce((s, d) => s + d.value, 0);
+    const cx = 110, cy = 110, r = 80, inner = 48;
+
+    let angle = -Math.PI / 2;
+    const slices = data.map((d, i) => {
+      const sweep = (d.value / total) * Math.PI * 2;
+      const x1 = cx + r * Math.cos(angle);
+      const y1 = cy + r * Math.sin(angle);
+      angle += sweep;
+      const x2 = cx + r * Math.cos(angle);
+      const y2 = cy + r * Math.sin(angle);
+      const ix1 = cx + inner * Math.cos(angle - sweep);
+      const iy1 = cy + inner * Math.sin(angle - sweep);
+      const ix2 = cx + inner * Math.cos(angle);
+      const iy2 = cy + inner * Math.sin(angle);
+      const large = sweep > Math.PI ? 1 : 0;
+      const color = RAG_COLOR[d.rag]?.() || PALETTE[i % PALETTE.length];
+      const midA = angle - sweep / 2;
+      const lx = cx + (r + 14) * Math.cos(midA);
+      const ly = cy + (r + 14) * Math.sin(midA);
+      const pct = Math.round((d.value / total) * 100);
+
+      return {
+        path: `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}
+               L ${ix2} ${iy2} A ${inner} ${inner} 0 ${large} 0 ${ix1} ${iy1} Z`,
+        color, pct, d, lx, ly,
+      };
+    });
+
+    const paths = slices.map(s => `
+      <path d="${s.path}" fill="${s.color}" opacity="0.88"
+            class="pie-slice" style="transition:transform 0.2s ease;cursor:pointer;transform-origin:${cx}px ${cy}px"
+            onmouseover="this.style.transform='scale(1.04)'" onmouseout="this.style.transform=''">
+        <title>${_esc(s.d.label)}: ${s.pct}%</title>
+      </path>`).join('');
+
+    const legend = slices.map(s => `
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,0.65)">
+        <div style="width:12px;height:12px;border-radius:2px;flex-shrink:0;background:${s.color}"></div>
+        <span>${_esc(s.d.label)}</span>
+        <span style="margin-left:auto;font-weight:600;color:rgba(255,255,255,0.85)">${s.pct}%</span>
+      </div>`).join('');
+
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;gap:32px;flex-wrap:wrap;justify-content:center">
+        <svg width="220" height="220" viewBox="0 0 220 220">
+          ${paths}
+          <text x="${cx}" y="${cy - 6}" text-anchor="middle" fill="rgba(255,255,255,0.4)"
+                font-size="11" letter-spacing="1">TOTAL</text>
+          <text x="${cx}" y="${cy + 14}" text-anchor="middle" fill="rgba(255,255,255,0.85)"
+                font-size="16" font-weight="700">${data.length}</text>
+          <text x="${cx}" y="${cy + 28}" text-anchor="middle" fill="rgba(255,255,255,0.35)"
+                font-size="10">KPIs</text>
+        </svg>
+        <div style="display:flex;flex-direction:column;gap:10px;min-width:160px;max-width:240px">
+          ${legend}
+        </div>
       </div>`;
   }
 
-  // ── RENDER ────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Main HTML renderer — called by Pages.overview()
+  // ─────────────────────────────────────────────────────────────────────────
   function render() {
     const settings     = DataStore.getSettings();
     const overviewKpis = DataStore.getOverviewKpis();
@@ -2532,140 +1989,66 @@ const OverviewPanel = (() => {
     const st           = _getState();
     const mode         = settings.reportingPeriod || 'monthly';
 
-    const ragCounts = {green:0,amber:0,red:0,neutral:0};
-    allKpis.forEach(k => {
-      const ps = DataStore.getPeriodStats(k, mode);
-      ragCounts[ps.rag || k.rag || 'neutral']++;
-    });
+    const ragCounts = { green: 0, amber: 0, red: 0, neutral: 0 };
+    allKpis.forEach(k => { ragCounts[k.rag || 'neutral']++; });
 
-    const heroKpiIds = st.heroKpiIds;
-    const heroKpis   = heroKpiIds === undefined || heroKpiIds === null
-      ? DataStore.getKeyKpis()
-      : heroKpiIds.length > 0
-        ? allKpis.filter(k => heroKpiIds.includes(k.id))
-        : [];
+    // Hero KPIs — what's selected for the big card
+    const heroKpiIds  = st.heroKpiIds || [];
+    const heroKpis    = heroKpiIds.length > 0
+      ? allKpis.filter(k => heroKpiIds.includes(k.id))
+      : DataStore.getKeyKpis();
 
-    const header   = _renderHeader(settings, overviewKpis, allKpis);
+    // Surrounding cards — key KPIs NOT in the hero (or all if hero is grid-embedded)
+    const surroundKpis = overviewKpis;
+
+    // ── Header ──────────────────────────────────────────────────────────────
+    const header = _renderHeader(settings, overviewKpis, allKpis);
+
+    // ── RAG pill strip ───────────────────────────────────────────────────────
     const ragStrip = _renderRagStrip(ragCounts, allKpis.length);
 
-    const isCollapsed = heroKpis.length === 0;
+    // ── Hero card ────────────────────────────────────────────────────────────
+    const heroCard = _renderHeroCard(st, heroKpis, allKpis, settings);
 
-    // All overview KPI cards render uniformly — the grid auto-places them
-    // Hero takes cols 1-3 × rows 1-2 (expanded) or 1×1 (collapsed)
-    // KPI cards are always 1 col × 1 row = 200px, auto-placed by CSS grid
-    const allKpiCards = overviewKpis.map(kpi =>
-      `<div class="overview-kpi-cell dnd-grid-card" draggable="true" data-dnd-id="${kpi.id}"
-           ondragstart="OverviewPanel.dndStart('${kpi.id}',event)"
-           ondragend="OverviewPanel.dndEnd()"
-           ondragover="event.stopPropagation();OverviewPanel.dndOver('${kpi.id}',event)"
-           ondrop="event.stopPropagation();OverviewPanel.dndDrop('${kpi.id}',event)">
-        <div class="dnd-grip-overlay" title="Drag to reorder">⠿</div>
-        ${_renderKpiCard(kpi, st, mode)}
-      </div>`
-    ).join('');
+    // ── Surrounding KPI cards ────────────────────────────────────────────────
+    const kpiGrid = surroundKpis.length > 0
+      ? `<div style="margin-bottom:12px">
+           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+             <h3 style="font-family:var(--font-display);font-size:15px;font-weight:600;margin:0;color:var(--text-primary)">Key Metrics</h3>
+             <span class="label-xs" style="color:var(--text-muted)">${surroundKpis.length} pinned · ${mode} view</span>
+           </div>
+           <div class="grid-auto">
+             ${surroundKpis.map(kpi => Components.kpiCard(kpi, DataStore.getPeriodStats(kpi, mode), true)).join('')}
+           </div>
+         </div>`
+      : allKpis.length > 0 ? '' : `
+         <div class="card" style="text-align:center;padding:40px;margin-bottom:24px">
+           <div style="font-size:32px;margin-bottom:12px">◈</div>
+           <div style="font-size:16px;font-weight:600;margin-bottom:6px">No Key Metrics yet</div>
+           <div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
+             In Data Entry, tick the <strong>Ovw</strong> checkbox next to any KPI to pin it here.
+           </div>
+           <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
+         </div>`;
 
-    // Collapsed hero picker dropdown — rendered inline inside collapsed card
-    const pickerOpen = st.kpiPickerOpen || false;
-    const heroKpiIdsSafe = Array.isArray(heroKpiIds) ? heroKpiIds : [];
-    const collapsedPickerDropdown = pickerOpen ? `
-      <div id="hero-collapsed-picker" style="position:absolute;left:50%;transform:translateX(-50%);top:calc(100% + 8px);width:300px;z-index:200;
-                  background:var(--bg-modal);border:1px solid var(--border-card);
-                  border-radius:10px;box-shadow:var(--shadow-modal);overflow:hidden"
-           onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
-        <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between">
-          <div style="font-size:12px;font-weight:600;color:var(--text-primary)">Select KPIs for Hero Card</div>
-          <button onclick="event.stopPropagation();OverviewPanel.closeCollapsedPicker()"
-                  style="color:var(--text-muted);font-size:16px;background:none;border:none;cursor:pointer;padding:0 2px">✕</button>
-        </div>
-        <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle)">
-          <input type="text" class="input-field" style="padding:6px 10px;font-size:12px"
-                 placeholder="Search KPIs…"
-                 onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"
-                 oninput="OverviewPanel.filterHeroKpiSearch(this.value)">
-        </div>
-        <div id="hero-kpi-list" style="max-height:240px;overflow-y:auto">
-          ${allKpis.length === 0
-            ? '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No KPIs yet — add some in Data Entry first</div>'
-            : allKpis.map(k => `
-                <div class="hero-kpi-item" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
-                  <div style="flex:1;min-width:0">
-                    <div class="hki-name">${_esc(k.metric)}</div>
-                    <div class="hki-section">${_esc(k.section)}</div>
-                  </div>
-                  <input type="checkbox" ${heroKpiIdsSafe.includes(k.id)?'checked':''}
-                         style="accent-color:var(--brand-accent);width:15px;height:15px;flex-shrink:0;cursor:pointer"
-                         onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"
-                         onchange="event.stopPropagation();OverviewPanel.toggleHeroKpi('${k.id}',this.checked)">
-                </div>`).join('')}
-        </div>
-        <div style="padding:8px 12px;border-top:1px solid var(--border-subtle);display:flex;gap:8px"
-             onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
-          <button onclick="event.stopPropagation();OverviewPanel.setHeroAllKpis(true)"  class="btn btn-ghost"   style="flex:1;font-size:11px;padding:5px">All</button>
-          <button onclick="event.stopPropagation();OverviewPanel.setHeroAllKpis(false)" class="btn btn-ghost"   style="flex:1;font-size:11px;padding:5px">None</button>
-          <button onclick="event.stopPropagation();OverviewPanel.closeCollapsedPicker()"  class="btn btn-primary" style="flex:1;font-size:11px;padding:5px">Done</button>
-        </div>
-      </div>` : '';
-
-    const collapsedHeroCard = `
-      <div class="overview-hero-slot overview-hero-collapsed${pickerOpen ? ' picker-open' : ''}"
-           style="position:relative;">
-        <button onclick="event.stopPropagation();OverviewPanel.toggleKpiPicker()"
-                style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;
-                       width:100%;height:100%;justify-content:center">
-          <div style="width:40px;height:40px;border-radius:50%;
-                      border:2px solid ${pickerOpen ? 'var(--brand-accent)' : 'var(--border-card)'};
-                      display:flex;align-items:center;justify-content:center;font-size:22px;
-                      color:${pickerOpen ? 'var(--brand-accent)' : 'var(--text-muted)'};
-                      transition:all 0.15s">+</div>
-          <div style="font-size:11px;color:${pickerOpen ? 'var(--brand-accent)' : 'var(--text-muted)'};font-weight:500;transition:color 0.15s">Hero chart</div>
-        </button>
-        ${collapsedPickerDropdown}
-      </div>`;
-
-    const expandedHeroCard = `
-      <div class="overview-hero-slot overview-hero-expanded">
-        ${_renderHeroCard(st, heroKpis, allKpis, settings)}
-      </div>`;
-
-    const emptyState = allKpis.length === 0 ? `
-      <div style="grid-column:span 4">
-        <div class="card" style="text-align:center;padding:40px">
-          <div style="font-size:32px;margin-bottom:12px">◈</div>
-          <div style="font-size:16px;font-weight:600;margin-bottom:6px">No Key Metrics yet</div>
-          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">In Data Entry, tick the <strong>Ovw</strong> checkbox to pin KPIs here.</div>
-          <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
-        </div>
-      </div>` : '';
-
-    const heroWithSide = `
-      <div class="overview-kpi-grid" id="dnd-zone-grid" style="margin-bottom:24px"
-           ondragover="OverviewPanel.dndOver(null,event)"
-           ondrop="OverviewPanel.dndDrop(null,event)">
-        ${isCollapsed ? collapsedHeroCard : expandedHeroCard}
-        ${allKpiCards}
-        ${emptyState}
-      </div>`;
-
+    // ── Section grid ─────────────────────────────────────────────────────────
     const sectionGrid = sections.length > 0 ? `
       <div style="margin-top:8px">
-        <h3 style="font-family:var(--font-display);font-size:15px;font-weight:600;margin-bottom:12px">All Sections</h3>
+        <h3 style="font-family:var(--font-display);font-size:15px;font-weight:600;margin-bottom:12px;color:var(--text-primary)">All Sections</h3>
         <div class="grid-3">
           ${sections.map(section => {
             const skpis  = DataStore.getKpisBySection(section);
-            const counts = {green:0,amber:0,red:0,neutral:0};
-            skpis.forEach(k=>{
-              const ps = DataStore.getPeriodStats(k, mode);
-              counts[ps.rag || k.rag || 'neutral']++;
-            });
-            const pid = 'section:'+encodeURIComponent(section);
+            const counts = { green:0, amber:0, red:0, neutral:0 };
+            skpis.forEach(k => { counts[k.rag || 'neutral']++; });
+            const pageId = 'section:' + encodeURIComponent(section);
             return `
-              <div class="card" style="cursor:pointer;transition:all 0.15s" onclick="App.navigate('${pid}')"
+              <div class="card" style="cursor:pointer;transition:all 0.15s" onclick="App.navigate('${pageId}')"
                    onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-                <div style="font-family:var(--font-display);font-size:14px;font-weight:600;margin-bottom:8px">${_esc(section)}</div>
+                <div style="font-family:var(--font-display);font-size:14px;font-weight:600;margin-bottom:8px;line-height:1.3">${_esc(section)}</div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
                   ${Object.entries(counts).filter(([,v])=>v>0).map(([r,c])=>`<span class="rag-badge ${r}" style="font-size:10px;padding:2px 7px">${c} ${r}</span>`).join('')}
                 </div>
-                <div class="label-xs">${skpis.length} KPIs →</div>
+                <div class="label-xs">${skpis.length} KPIs &nbsp;→</div>
               </div>`;
           }).join('')}
         </div>
@@ -2673,301 +2056,66 @@ const OverviewPanel = (() => {
 
     return `
       <div style="margin-bottom:24px">
-        ${header}${ragStrip}${heroWithSide}${sectionGrid}
+        ${header}
+        ${ragStrip}
+        ${heroCard}
+        ${kpiGrid}
+        ${sectionGrid}
       </div>
 
       <style>
-        /* ══════════════════════════════════════════════════════
-           OVERVIEW GRID — fixed row height, strict card sizing
-           Hero = 3 cols × 2 rows (416px incl gap). Every KPI cell = 1 col × 1 row = 200px.
-           Grid auto-places KPI cards around the hero naturally.
-           ══════════════════════════════════════════════════════ */
+        /* ── Odometer / Gauge ── */
+        .odo-grid { display:flex;flex-wrap:wrap;gap:24px;justify-content:center;align-items:flex-end;padding:8px 0 }
+        .odo-block { display:flex;flex-direction:column;align-items:center }
+        .odo-main  { min-width:220px;max-width:280px;flex:0 0 260px }
+        .odo-small { min-width:160px;max-width:200px;flex:0 0 180px }
+        .odo-svg   { width:100%;display:block;overflow:visible }
+        .odo-title { font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;text-align:center }
+        .odo-value { font-family:var(--font-display);font-size:1.6rem;font-weight:700;margin-top:-4px;letter-spacing:-0.5px }
+        .odo-meta  { display:flex;align-items:center;gap:10px;margin-top:4px;font-size:11px;color:var(--text-muted) }
+        .odo-rag   { font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:0.06em }
+        .odo-rag-green  { color:var(--rag-green);background:var(--rag-green-bg) }
+        .odo-rag-amber  { color:var(--rag-amber);background:var(--rag-amber-bg) }
+        .odo-rag-red    { color:var(--rag-red);background:var(--rag-red-bg) }
+        .odo-rag-neutral{ color:var(--rag-neutral);background:var(--rag-neutral-bg) }
+        .odo-progress-wrap { width:80%;height:3px;background:rgba(255,255,255,0.07);border-radius:2px;margin-top:8px;overflow:hidden }
+        .odo-progress-fill { height:100%;border-radius:2px;transition:width 0.9s ease }
 
-        .overview-kpi-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          grid-auto-rows: 200px;
-          gap: 16px;
-          align-items: stretch;
-          overflow: visible;
-        }
-
-        /* Hero slot base */
-        .overview-hero-slot {
-          border-radius: 16px;
-          box-shadow: var(--shadow-card);
-        }
-        .overview-hero-expanded {
-          grid-column: 1 / span 3;
-          grid-row: 1 / span 2;
-          background: var(--bg-card);
-          border: 1px solid var(--border-card);
-          padding: 14px 20px 16px;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-        }
-        .overview-hero-collapsed {
-          grid-column: 1 / span 1;
-          grid-row: 1 / span 1;
-          background: var(--bg-card);
-          border: 2px dashed var(--border-card);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          overflow: visible;
-          position: relative;
-        }
-        .overview-hero-collapsed.picker-open {
-          border-color: var(--brand-accent);
-        }
-
-        /* KPI card cell — grid places it, overflow visible so dropdown escapes */
-        .overview-kpi-cell {
-          min-height: 0;
-          min-width: 0;
-          box-sizing: border-box;
-          overflow: visible;
-          position: relative;
-          z-index: 1;
-        }
-        .overview-kpi-cell:has(.card-viz-dropdown) { z-index: 100; }
-
-        /* ── KPI viz card shell — fills its cell exactly ── */
-        .kpi-viz-card {
-          background: var(--bg-card);
-          border: 1px solid var(--border-card);
-          border-radius: var(--card-radius);
-          padding: 12px 14px 10px;
-          box-shadow: var(--shadow-card);
-          width: 100%;
-          height: 100%;
-          box-sizing: border-box;
-          display: flex;
-          flex-direction: column;
-          position: relative;
-          overflow: visible;   /* must be visible so dropdown isn't clipped */
-          cursor: pointer;
-        }
-        /* Clip only the interior content, not the whole card */
-        .kpi-viz-card > *:not(.card-viz-dropdown) { position:relative; z-index:1 }
-        .kpi-viz-card:hover { border-color: var(--brand-accent); }
-
-        /* ── Viz content area — takes remaining height after header ── */
-        .card-viz-content {
-          flex: 1;
-          min-height: 0;
-          overflow: hidden;         /* critical: clips charts to card bounds */
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-        }
-
-        /* Tighten value font in cards so it fits */
-        .kpi-viz-card .value-xl { font-size: 22px; }
-
-        /* ── Card viz ••• menu ── */
-        .card-viz-menu-btn { opacity:0;transition:opacity 0.15s;background:var(--bg-input);border:1px solid var(--border-card);border-radius:5px;padding:2px 7px;cursor:pointer;color:var(--text-muted);font-size:12px;letter-spacing:1.5px;line-height:1.4 }
-        .kpi-viz-card:hover .card-viz-menu-btn { opacity:1 }
-        .card-viz-menu-btn.open { opacity:1;color:var(--brand-accent);border-color:var(--brand-accent) }
-        /* Dropdown: absolute within card header's relative container, z-index above grid */
-        .card-viz-dropdown { position:absolute;right:0;top:calc(100% + 2px);width:168px;background:var(--bg-modal);border:1px solid var(--border-card);border-radius:8px;box-shadow:var(--shadow-modal);z-index:9999;overflow:hidden }
-        .card-viz-option { display:flex;align-items:center;gap:9px;padding:8px 12px;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-secondary);transition:background 0.1s }
-        .card-viz-option:hover { background:var(--bg-card-hover);color:var(--text-primary) }
-        .card-viz-option.active { color:var(--brand-accent);background:rgba(0,194,168,0.08) }
-
-        /* ── Odometer layout (hero chart area) ── */
-        .odo-row  { display:grid;grid-auto-columns:1fr;grid-auto-flow:column;gap:16px;width:100%;height:100%;align-items:stretch }
-        .odo-col  { display:flex;flex-direction:column;align-items:center;position:relative;min-width:0;min-height:0 }
-        .odo-block { display:flex;flex-direction:column;align-items:center;width:100%;height:100%;min-height:0 }
-        .odo-main  { width:100% }
-        .odo-small { width:100% }
-        .odo-svg   { width:100%;display:block }
-        /* Hub ⊕ button — lives inside the SVG, hover styles via CSS */
-        .odo-hub-ring { transition:stroke 0.15s,stroke-width 0.15s }
-        .odo-hub-btn:hover .odo-hub-ring { stroke:var(--brand-accent) !important;stroke-width:2 !important }
-        .odo-hub-plus { opacity:0;transition:opacity 0.15s }
-        .odo-hub-btn:hover .odo-hub-plus { opacity:1 }
-        .odo-reorder-btns { display:flex;align-items:center;gap:4px;margin-bottom:6px;opacity:0;transition:opacity 0.15s;flex-shrink:0 }
-        .odo-col:hover .odo-reorder-btns { opacity:1 }
-        .odo-move-btn { background:var(--bg-input);border:1px solid var(--border-card);border-radius:4px;color:var(--text-muted);font-size:12px;padding:1px 7px;cursor:pointer;transition:all 0.1s }
-        .odo-move-btn:hover:not([disabled]) { color:var(--brand-accent);border-color:var(--brand-accent) }
-        .odo-move-btn[disabled] { opacity:0.2;cursor:default }
-        .odo-pos-label { font-size:10px;color:var(--text-muted);min-width:28px;text-align:center }
-        .hero-menu-btn { opacity:0.6;transition:opacity 0.15s }
+        /* ── Hero card menu ── */
+        .hero-menu-btn { opacity:0.5;transition:opacity 0.15s }
         .hero-menu-btn:hover { opacity:1 }
-        .hero-kpi-item { display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border-subtle);transition:background 0.1s }
+
+        /* ── Chart type tabs ── */
+        .ct-tab { padding:5px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.15s;border:1px solid transparent }
+        .ct-tab.active { background:rgba(0,194,168,0.15);border-color:rgba(0,194,168,0.35);color:var(--brand-accent) }
+        .ct-tab:not(.active) { color:var(--text-muted) }
+        .ct-tab:not(.active):hover { color:var(--text-primary);background:rgba(255,255,255,0.04) }
+
+        /* ── KPI picker ── */
+        .hero-kpi-item { display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border-subtle);transition:background 0.1s;cursor:default }
         .hero-kpi-item:hover { background:var(--bg-card-hover) }
-        .hki-name    { font-size:12px;font-weight:500;color:var(--text-primary);line-height:1.35 }
+        .hki-name { font-size:12px;font-weight:500;color:var(--text-primary);line-height:1.35;word-break:break-word }
         .hki-section { font-size:10px;color:var(--text-muted);margin-top:2px }
-
-        /* ── Responsive: collapse to 2-col on tablet ── */
-        @media (max-width: 900px) {
-          .overview-kpi-grid { grid-template-columns: repeat(2, 1fr); }
-          .overview-hero-expanded { grid-column: 1 / span 2; grid-row: 1 / span 2; }
-        }
-        /* ── Mobile: single column, vertical hero metrics, auto heights ── */
-        @media (max-width: 560px) {
-          .overview-kpi-grid {
-            grid-template-columns: 1fr;
-            grid-auto-rows: auto;
-            gap: 12px;
-          }
-          .overview-hero-expanded {
-            grid-column: 1;
-            grid-row: auto;
-            min-height: 0;
-            padding: 12px;
-          }
-          .overview-hero-collapsed { min-height: 100px; }
-          /* Stack each hero metric below the previous one */
-          .odo-row {
-            display: flex;
-            flex-direction: column;
-            height: auto;
-            gap: 20px;
-          }
-          .odo-col { min-height: 220px; }
-          /* Hide reorder controls — not useful on mobile */
-          .odo-reorder-btns { display: none !important; }
-          /* KPI viz cards: natural height instead of stretching to fixed row */
-          .kpi-viz-card { height: auto; min-height: 150px; }
-          /* Tighten card viz option row */
-          .card-viz-option { padding: 10px 12px; }
-        }
-
-        /* ── Drag-and-drop ── */
-        .dnd-grid-card[draggable="true"] { cursor: grab; }
-        .dnd-grid-card[draggable="true"]:active { cursor: grabbing; }
-
-        .dnd-dragging { opacity: 0.25 !important; }
-
-        /* Swap target indicator: teal border all around */
-        .dnd-drop-before .kpi-viz-card {
-          border-color: var(--brand-accent) !important;
-          box-shadow: 0 0 0 2px rgba(0,194,168,0.35) !important;
-        }
-
-        /* Zone-level drop highlight */
-        #dnd-zone-grid.dnd-zone-active {
-          outline: 2px dashed var(--brand-accent);
-          outline-offset: 6px;
-          border-radius: 12px;
-        }
-
-        /* Grip handle overlay — shows on hover */
-        .dnd-grip-overlay {
-          position: absolute;
-          top: 7px; left: 7px;
-          z-index: 20;
-          font-size: 13px;
-          color: var(--text-muted);
-          opacity: 0;
-          transition: opacity 0.15s;
-          pointer-events: none;
-          user-select: none;
-          line-height: 1;
-        }
-        .dnd-grid-card:hover .dnd-grip-overlay { opacity: 0.55; }
       </style>`;
   }
 
-  // ── Per-card render (with viz type switcher) ──────────────────────────────
-  function _renderKpiCard(kpi, st, mode) {
-    const cardVizTypes = st.cardVizTypes || {};
-    const vizType      = cardVizTypes[kpi.id] || 'card';
-    const menuOpen     = st.cardMenuOpen === kpi.id;
-    const rag          = kpi.rag || 'neutral';
-
-    // Always use period-aware RAG so the line colour matches the data shown
-    const ps      = DataStore.getPeriodStats(kpi, mode);
-    const cardRag = ps.rag || kpi.rag || 'neutral';
-    const ragColor = { green:'var(--rag-green)', amber:'var(--rag-amber)', red:'var(--rag-red)', neutral:'var(--rag-neutral)' }[cardRag];
-
-    // Inline RAG line — sits inside the card padding, fully contained, never overlaps border
-    const ragLine = `<div style="height:2px;border-radius:2px;background:${ragColor};margin-bottom:10px;opacity:0.9"></div>`;
-
-    const vizOptions = [
-      { v:'card',     l:'KPI Card',    i:'⊡' },
-      { v:'odometer', l:'Odometer',    i:'◎' },
-      { v:'bar',      l:'Bar Chart',   i:'▊' },
-      { v:'line',     l:'Line Chart',  i:'∿' },
-    ];
-
-
-    const _metricLen = kpi.metric.length;
-    const _metricSize = _metricLen > 60 ? '10px' : _metricLen > 40 ? '11px' : _metricLen > 25 ? '12px' : '13px';
-    const cardHeader = `
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px;position:relative">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);line-height:1.2">${kpi.section}</div>
-          <div style="font-size:${_metricSize};font-weight:500;color:var(--text-primary);margin-top:2px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${kpi.metric}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:6px">
-          ${kpi.who?`<div class="label-xs" style="color:var(--brand-accent)">${kpi.who}</div>`:''}
-          <button class="card-viz-menu-btn ${menuOpen?'open':''}"
-                  onclick="event.stopPropagation();OverviewPanel.toggleCardMenu('${kpi.id}',this)"
-                  title="Change visualization">•••</button>
-        </div>
-      </div>`;
-
-    if (vizType === 'card') {
-      // Standard KPI card content
-      const val        = DataStore.formatValue(ps.actual, kpi);
-      const targetDisp = ps.target !== null ? DataStore.formatValue(ps.target, kpi) : '—';
-      const pct        = ps.progressPct;
-
-      return `
-        <div class="kpi-viz-card rag-${cardRag}" onclick="App.openKpiDetail('${kpi.id}')">
-          ${ragLine}
-          ${cardHeader}
-          <div class="card-viz-content">
-            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
-              <div class="value-xl">${val}</div>
-              <div class="label-xs" style="color:var(--text-muted)">${ps.label}</div>
-            </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap">
-              <span class="label-xs">Target: ${targetDisp}</span>
-              <span class="rag-badge ${cardRag}" style="font-size:10px;padding:2px 7px">${cardRag==='green'?'● On Track':cardRag==='amber'?'▲ At Risk':cardRag==='red'?'✕ Off Track':'○ No Data'}</span>
-            </div>
-            <div class="progress-bar">
-              <div class="progress-bar-fill" style="width:${pct}%;background:${ragColor}"></div>
-            </div>
-            ${pct>0?`<div class="label-xs" style="margin-top:4px;text-align:right">${pct}% of target</div>`:''}
-            ${kpi.comment?`<div style="margin-top:6px;font-size:11px;color:var(--rag-amber);font-style:italic">${kpi.comment}</div>`:''}
-          </div>
-        </div>`;
-    }
-
-    // Non-card viz types: render a card shell with a viz content area
-    return `
-      <div class="kpi-viz-card rag-${rag}" onclick="App.openKpiDetail('${kpi.id}')">
-        ${ragLine}
-        ${cardHeader}
-        <div class="card-viz-content" id="card-viz-${kpi.id}" onclick="event.stopPropagation()">
-          <div style="text-align:center;color:var(--text-muted);font-size:11px;padding:8px">Loading…</div>
-        </div>
-      </div>`;
-  }
-
-  // ── Header ────────────────────────────────────────────────────────────────
+  // ─── Header row ───────────────────────────────────────────────────────────
   function _renderHeader(settings, overviewKpis, allKpis) {
     const overviewIds = settings.overviewKpiIds;
-    const manageList  = allKpis.length === 0 ? '' : allKpis.map((k, i) => {
+    const manageList = allKpis.length === 0 ? '' : allKpis.map(k => {
       const isVisible = k.isKey && (!overviewIds || overviewIds.includes(k.id));
-      return `
-        <div class="mkpi-row" style="display:flex;align-items:center;gap:10px;padding:8px 12px;${i>0?'border-top:1px solid var(--border-subtle)':''}transition:background 0.1s"
-             onmouseover="this.style.background='var(--bg-card-hover)'" onmouseout="this.style.background=''">
-          <div style="flex:1;min-width:0">
-            <div style="font-size:12px;font-weight:500;color:var(--text-primary)">${_esc(k.metric)}</div>
-            <div style="font-size:10px;color:var(--text-muted)">${_esc(k.section)}</div>
-          </div>
-          <input type="checkbox" ${isVisible?'checked':''}
-                 style="accent-color:var(--brand-accent);width:15px;height:15px;cursor:pointer"
-                 onchange="App.addKpiToOverview('${k.id}',this.checked)">
-        </div>`;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;
+                          border-bottom:1px solid var(--border-subtle);
+                          transition:background 0.1s;cursor:default"
+                   onmouseover="this.style.background='var(--bg-card-hover)'" onmouseout="this.style.background=''">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:500;color:var(--text-primary);line-height:1.35;word-break:break-word">${_esc(k.metric)}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${_esc(k.section)}</div>
+        </div>
+        <input type="checkbox" ${isVisible?'checked':''}
+               style="accent-color:var(--brand-accent);width:15px;height:15px;flex-shrink:0;cursor:pointer"
+               onchange="App.addKpiToOverview('${k.id}',this.checked)">
+      </div>`;
     }).join('');
 
     return `
@@ -2982,25 +2130,29 @@ const OverviewPanel = (() => {
                            background:var(--bg-card);color:var(--text-secondary);cursor:pointer;transition:all 0.15s"
                     onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
               ⊞ Manage KPIs
-              <span style="background:rgba(0,194,168,0.15);color:var(--brand-accent);font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700">${overviewKpis.length}/${allKpis.length}</span>
+              <span style="background:rgba(0,194,168,0.15);color:var(--brand-accent);font-size:10px;
+                           padding:1px 6px;border-radius:10px;font-weight:700">${overviewKpis.length}/${allKpis.length}</span>
             </button>
             <div id="manage-kpi-dropdown" style="display:none;position:absolute;right:0;top:calc(100% + 6px);
-                 width:320px;background:var(--bg-modal);border:1px solid var(--border-card);
+                 width:340px;background:var(--bg-modal);border:1px solid var(--border-card);
                  border-radius:10px;box-shadow:var(--shadow-modal);z-index:150;overflow:hidden">
-              <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between">
-                <div style="font-size:12px;font-weight:600">Manage Overview KPIs</div>
-                <button onclick="App.toggleManageKpiDropdown()" style="color:var(--text-muted);font-size:16px;background:none;border:none;cursor:pointer">✕</button>
+              <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle);
+                          display:flex;align-items:center;justify-content:space-between">
+                <div style="font-size:12px;font-weight:600;color:var(--text-primary)">Manage Overview KPIs</div>
+                <button onclick="App.toggleManageKpiDropdown()"
+                        style="color:var(--text-muted);font-size:16px;background:none;border:none;cursor:pointer;padding:0 2px">✕</button>
               </div>
               <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle)">
-                <input type="text" id="manage-kpi-search" class="input-field" style="padding:6px 10px;font-size:12px"
-                       placeholder="Search KPIs…" oninput="App.filterManageKpiList(this.value)">
+                <input type="text" id="manage-kpi-search" class="input-field"
+                       style="padding:6px 10px;font-size:12px" placeholder="Search KPIs…"
+                       oninput="App.filterManageKpiList(this.value)">
               </div>
               <div id="manage-kpi-list" style="max-height:260px;overflow-y:auto">
-                ${manageList||'<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No KPIs yet</div>'}
+                ${manageList || '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No KPIs yet</div>'}
               </div>
               <div style="padding:8px 12px;border-top:1px solid var(--border-subtle);display:flex;gap:8px">
-                <button onclick="App.setAllOverviewKpis(true)" class="btn btn-ghost" style="flex:1;font-size:11px;padding:5px">All</button>
-                <button onclick="App.setAllOverviewKpis(false)" class="btn btn-ghost" style="flex:1;font-size:11px;padding:5px">None</button>
+                <button onclick="App.setAllOverviewKpis(true)" class="btn btn-ghost" style="flex:1;font-size:11px;padding:5px">Select All</button>
+                <button onclick="App.setAllOverviewKpis(false)" class="btn btn-ghost" style="flex:1;font-size:11px;padding:5px">Clear All</button>
               </div>
             </div>
           </div>` : ''}
@@ -3010,20 +2162,21 @@ const OverviewPanel = (() => {
             <option value="quarterly" ${settings.reportingPeriod==='quarterly'?'selected':''}>Quarterly</option>
             <option value="ytd"       ${settings.reportingPeriod==='ytd'?'selected':''}>YTD</option>
             <option value="yearly"    ${settings.reportingPeriod==='yearly'?'selected':''}>Full Year</option>
+            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY</option>
           </select>
         </div>
       </div>`;
   }
 
-  // ── RAG Strip ─────────────────────────────────────────────────────────────
+  // ─── RAG Strip ────────────────────────────────────────────────────────────
   function _renderRagStrip(ragCounts, total) {
     return `
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
-        ${Object.entries(ragCounts).map(([rag,cnt]) => cnt > 0 ? `
+        ${Object.entries(ragCounts).map(([rag,cnt])=>cnt>0?`
           <div style="background:var(--bg-card);border:1px solid var(--border-card);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:8px">
             <div class="rag-badge ${rag}">${rag.charAt(0).toUpperCase()+rag.slice(1)}</div>
             <span style="font-family:var(--font-display);font-size:20px;font-weight:700">${cnt}</span>
-          </div>` : '').join('')}
+          </div>`:'').join('')}
         <div style="flex:1;background:var(--bg-card);border:1px solid var(--border-card);border-radius:8px;padding:10px 16px;display:flex;align-items:center;justify-content:flex-end;gap:6px">
           <span class="label-xs">Total KPIs:</span>
           <span style="font-size:14px;font-weight:700;color:var(--brand-accent)">${total}</span>
@@ -3031,48 +2184,59 @@ const OverviewPanel = (() => {
       </div>`;
   }
 
-  // ── Hero Card ─────────────────────────────────────────────────────────────
+  // ─── Hero Card ────────────────────────────────────────────────────────────
   function _renderHeroCard(st, heroKpis, allKpis, settings) {
-    const chartType   = st.chartType || 'odometer';
-    const heroPosition= st.heroPosition || 'center';
-    const menuOpen    = st.menuOpen || false;
-    const pickerOpen  = st.kpiPickerOpen || false;
-    const heroKpiIds  = st.heroKpiIds || [];
+    const chartType    = st.chartType || 'odometer';
+    const heroPosition = st.heroPosition || 'center';
+    const menuOpen     = st.menuOpen || false;
+    const pickerOpen   = st.kpiPickerOpen || false;
+    const heroKpiIds   = st.heroKpiIds || [];
 
-    const chartOpts = [
-      { v:'odometer', l:'Odometer Gauges', i:'◎' },
-      { v:'bar',      l:'Bar Chart',       i:'▊' },
-      { v:'line',     l:'Line Chart',      i:'∿' },
-    ];
-    const curOpt = chartOpts.find(o => o.v === chartType) || chartOpts[0];
+    const chartLabels = { odometer:'Odometer', bar:'Bar Chart', line:'Line Chart', pie:'Pie Chart' };
+    const chartIcons  = { odometer:'◎', bar:'▊', line:'∿', pie:'◕' };
 
+    // ── Chart type menu ──
     const menuDropdown = menuOpen ? `
-      <div id="hero-menu-dropdown" style="position:absolute;right:0;top:calc(100% + 6px);width:230px;
-                  background:var(--bg-modal);border:1px solid var(--border-card);
+      <div style="position:absolute;right:0;top:calc(100% + 6px);
+                  width:200px;background:var(--bg-modal);border:1px solid var(--border-card);
                   border-radius:10px;box-shadow:var(--shadow-modal);z-index:160;overflow:hidden">
         <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle)">
-          <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted)">Chart Type</div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted)">Chart Type</div>
         </div>
-        ${chartOpts.map(o => `
-          <div onclick="OverviewPanel.setChartType('${o.v}')"
+        ${['odometer','bar','line','pie'].map(type => `
+          <div onclick="OverviewPanel.setChartType('${type}')"
                style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;
-                      background:${o.v===chartType?'rgba(0,194,168,0.08)':'transparent'};
-                      color:${o.v===chartType?'var(--brand-accent)':'var(--text-secondary)'};transition:background 0.1s"
-               onmouseover="this.style.background='var(--bg-card-hover)'"
-               onmouseout="this.style.background='${o.v===chartType?'rgba(0,194,168,0.08)':'transparent'}'">
-            <span style="font-size:15px;width:18px;text-align:center">${o.i}</span>
-            <span style="font-size:13px;font-weight:500">${o.l}</span>
-            ${o.v===chartType?'<span style="margin-left:auto;font-size:11px;color:var(--brand-accent)">✓</span>':''}
+                      background:${type===chartType?'rgba(0,194,168,0.08)':'transparent'};
+                      color:${type===chartType?'var(--brand-accent)':'var(--text-secondary)'};transition:background 0.1s"
+               onmouseover="this.style.background='var(--bg-card-hover)'" onmouseout="this.style.background='${type===chartType?'rgba(0,194,168,0.08)':'transparent'}'">
+            <span style="font-size:16px;width:18px;text-align:center">${chartIcons[type]}</span>
+            <span style="font-size:13px;font-weight:500">${chartLabels[type]}</span>
+            ${type===chartType?'<span style="margin-left:auto;font-size:11px;color:var(--brand-accent)">✓</span>':''}
           </div>`).join('')}
+        <div style="padding:8px 12px;border-top:1px solid var(--border-subtle)">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Position</div>
+          ${['center','grid'].map(pos => `
+            <div onclick="OverviewPanel.setHeroPosition('${pos}')"
+                 style="display:flex;align-items:center;gap:8px;padding:6px 2px;cursor:pointer;
+                        color:${pos===heroPosition?'var(--brand-accent)':'var(--text-secondary)'};font-size:12px">
+              <span style="width:14px;height:14px;border-radius:50%;border:2px solid currentColor;display:inline-flex;align-items:center;justify-content:center">
+                ${pos===heroPosition?'<span style="width:7px;height:7px;border-radius:50%;background:currentColor"></span>':''}
+              </span>
+              ${pos==='center'?'Full-width (standalone)':'In KPI grid flow'}
+            </div>`).join('')}
+        </div>
       </div>` : '';
 
+    // ── KPI picker ──
     const pickerDropdown = pickerOpen ? `
-      <div id="hero-picker-dropdown" style="position:absolute;left:0;top:calc(100% + 6px);width:320px;
-                  background:var(--bg-modal);border:1px solid var(--border-card);
+      <div style="position:absolute;left:0;top:calc(100% + 6px);
+                  width:320px;background:var(--bg-modal);border:1px solid var(--border-card);
                   border-radius:10px;box-shadow:var(--shadow-modal);z-index:160;overflow:hidden">
-        <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between">
-          <div style="font-size:12px;font-weight:600">Select KPIs for Hero Card</div>
-          <button onclick="OverviewPanel.toggleKpiPicker()" style="color:var(--text-muted);font-size:16px;background:none;border:none;cursor:pointer">✕</button>
+        <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle);
+                    display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:12px;font-weight:600;color:var(--text-primary)">Select KPIs for Hero Card</div>
+          <button onclick="OverviewPanel.toggleKpiPicker()"
+                  style="color:var(--text-muted);font-size:16px;background:none;border:none;cursor:pointer">✕</button>
         </div>
         <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle)">
           <input type="text" class="input-field" style="padding:6px 10px;font-size:12px"
@@ -3081,21 +2245,23 @@ const OverviewPanel = (() => {
         <div id="hero-kpi-list" style="max-height:240px;overflow-y:auto">
           ${allKpis.length === 0
             ? '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No KPIs yet</div>'
-            : allKpis.map(k => `
-                <div class="hero-kpi-item">
+            : allKpis.map(k => {
+                const isSelected = heroKpiIds.includes(k.id);
+                return `<div class="hero-kpi-item">
                   <div style="flex:1;min-width:0">
                     <div class="hki-name">${_esc(k.metric)}</div>
                     <div class="hki-section">${_esc(k.section)}</div>
                   </div>
-                  <input type="checkbox" ${heroKpiIds.includes(k.id)?'checked':''}
+                  <input type="checkbox" ${isSelected?'checked':''}
                          style="accent-color:var(--brand-accent);width:15px;height:15px;flex-shrink:0;cursor:pointer"
                          onchange="OverviewPanel.toggleHeroKpi('${k.id}',this.checked)">
-                </div>`).join('')}
+                </div>`;
+              }).join('')}
         </div>
         <div style="padding:8px 12px;border-top:1px solid var(--border-subtle);display:flex;gap:8px">
           <button onclick="OverviewPanel.setHeroAllKpis(true)" class="btn btn-ghost" style="flex:1;font-size:11px;padding:5px">All</button>
           <button onclick="OverviewPanel.setHeroAllKpis(false)" class="btn btn-ghost" style="flex:1;font-size:11px;padding:5px">None</button>
-          <button onclick="OverviewPanel.closeCollapsedPicker()" class="btn btn-primary" style="flex:1;font-size:11px;padding:5px">Done</button>
+          <button onclick="OverviewPanel.toggleKpiPicker()" class="btn btn-primary" style="flex:1;font-size:11px;padding:5px">Done</button>
         </div>
       </div>` : '';
 
@@ -3106,111 +2272,132 @@ const OverviewPanel = (() => {
       ? `<div style="text-align:center;padding:48px 24px;color:var(--text-muted)">
            <div style="font-size:36px;margin-bottom:12px">◈</div>
            <div style="font-size:15px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">No KPIs configured</div>
+           <div style="font-size:13px;margin-bottom:16px">Add KPIs in Data Entry to visualise them here.</div>
            <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
          </div>`
-      : `<div id="hero-chart-area" style="flex:1;min-height:0;overflow:hidden;display:flex;align-items:stretch">
-           <div style="text-align:center;padding:32px;color:var(--text-muted);font-size:12px;width:100%;display:flex;align-items:center;justify-content:center">Loading…</div>
+      : `<div id="hero-chart-area" style="min-height:200px;padding:8px 0">
+           <div style="text-align:center;padding:32px;color:var(--text-muted);font-size:12px">Loading chart…</div>
          </div>`;
 
     return `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:12px;flex-wrap:wrap">
-        <div style="position:relative" id="hero-picker-wrap">
-          <button onclick="OverviewPanel.toggleKpiPicker()"
-                  style="display:flex;align-items:center;gap:7px;padding:6px 13px;border-radius:8px;
-                         font-size:12px;font-weight:600;border:1px solid var(--border-card);
-                         background:var(--bg-input);color:var(--text-secondary);cursor:pointer;transition:all 0.15s"
-                  onmouseover="this.style.borderColor='var(--brand-accent)';this.style.color='var(--text-primary)'"
-                  onmouseout="this.style.borderColor='var(--border-card)';this.style.color='var(--text-secondary)'">
-            <span style="font-size:15px">◉</span>
-            ${heroCount} KPI${heroCount!==1?'s':''} selected
-            <span style="font-size:9px;opacity:0.5">▾</span>
-          </button>
-          ${pickerDropdown}
+      <div style="margin-bottom:24px">
+        <!-- Hero wrapper — position drives layout -->
+        <div style="position:relative;background:var(--bg-card);border:1px solid var(--border-card);
+                    border-radius:16px;padding:20px 24px;box-shadow:var(--shadow-card);
+                    ${heroPosition==='center' ? 'width:100%;' : ''}">
+
+          <!-- Top bar of hero card -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap">
+
+            <!-- Left: KPI picker trigger -->
+            <div style="position:relative" id="hero-picker-wrap">
+              <button onclick="OverviewPanel.toggleKpiPicker()"
+                      style="display:flex;align-items:center;gap:7px;padding:6px 13px;border-radius:8px;
+                             font-size:12px;font-weight:600;border:1px solid var(--border-card);
+                             background:var(--bg-input);color:var(--text-secondary);cursor:pointer;transition:all 0.15s"
+                      onmouseover="this.style.borderColor='var(--brand-accent)';this.style.color='var(--text-primary)'"
+                      onmouseout="this.style.borderColor='var(--border-card)';this.style.color='var(--text-secondary)'">
+                <span style="font-size:15px">◉</span>
+                ${heroCount} KPI${heroCount !== 1 ? 's' : ''} selected
+                <span style="font-size:9px;opacity:0.5">▾</span>
+              </button>
+              ${pickerDropdown}
+            </div>
+
+            <!-- Centre: chart type tabs -->
+            <div style="display:flex;gap:4px;background:var(--bg-input);border-radius:8px;padding:3px;border:1px solid var(--border-subtle)">
+              ${['odometer','bar','line','pie'].map(type => `
+                <button class="ct-tab ${type===chartType?'active':''}"
+                        onclick="OverviewPanel.setChartType('${type}')">
+                  ${chartIcons[type]} ${chartLabels[type]}
+                </button>`).join('')}
+            </div>
+
+            <!-- Right: ••• menu -->
+            <div style="position:relative" id="hero-menu-wrap">
+              <button class="hero-menu-btn" onclick="OverviewPanel.toggleMenu()"
+                      style="background:var(--bg-input);border:1px solid var(--border-card);
+                             border-radius:7px;padding:5px 10px;cursor:pointer;
+                             color:var(--text-secondary);font-size:16px;letter-spacing:2px">
+                •••
+              </button>
+              ${menuDropdown}
+            </div>
+          </div>
+
+          <!-- Decorative accent bar -->
+          <div style="height:2px;background:linear-gradient(90deg,var(--brand-accent),var(--brand-accent-2),transparent);
+                      border-radius:1px;margin-bottom:20px;opacity:0.6"></div>
+
+          <!-- Chart area -->
+          ${cardContent}
         </div>
-        <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;
-                    color:var(--brand-accent);background:rgba(0,194,168,0.08);
-                    border:1px solid rgba(0,194,168,0.2);border-radius:8px;padding:5px 13px">
-          <span>${curOpt.i}</span><span>${curOpt.l}</span>
-        </div>
-        <div style="position:relative" id="hero-menu-wrap">
-          <button class="hero-menu-btn" onclick="OverviewPanel.toggleMenu()"
-                  style="background:var(--bg-input);border:1px solid var(--border-card);
-                         border-radius:7px;padding:5px 10px;cursor:pointer;
-                         color:var(--text-secondary);font-size:16px;letter-spacing:2px">•••</button>
-          ${menuDropdown}
-        </div>
-      </div>
-      <div style="height:2px;background:linear-gradient(90deg,var(--brand-accent),var(--brand-accent-2),transparent);border-radius:1px;margin-bottom:12px;opacity:0.6"></div>
-      ${cardContent}`;
+      </div>`;
   }
 
-  // ── Formula modal helpers ─────────────────────────────────────────────────
-  function _fmlFilterKpis(q) {
-    const list  = document.getElementById('fml-kpi-list');
-    const empty = document.getElementById('fml-kpi-empty');
-    if (!list) return;
-    const query = q.toLowerCase().trim();
-    const labels = list.querySelectorAll('label.fml-kpi-row');
-    let visible = 0;
-    labels.forEach(lbl => {
-      const name = lbl.querySelector('div > div:first-child')?.textContent?.toLowerCase() || '';
-      const sect = lbl.querySelector('div > div:last-child')?.textContent?.toLowerCase() || '';
-      const show = !query || name.includes(query) || sect.includes(query);
-      // Use 'flex' not '' to preserve flex layout ('' would erase the inline display:flex)
-      lbl.style.display = show ? 'flex' : 'none';
-      if (show) {
-        lbl.style.borderTop = visible === 0 ? 'none' : '1px solid var(--border-subtle)';
-        visible++;
-      }
-    });
-    if (empty) empty.style.display = visible===0 && labels.length>0 ? '' : 'none';
-    if (list)  list.style.display  = visible===0 && labels.length>0 ? 'none' : '';
+  // ─── Utilities ────────────────────────────────────────────────────────────
+  function _esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  function _fmlFilterRef(q) {
-    const tbody = document.querySelector('#fml-ref-table tbody');
-    if (!tbody) return;
-    const query = q.toLowerCase().trim();
-    tbody.querySelectorAll('tr').forEach(row => {
-      row.style.display = !query || row.textContent.toLowerCase().includes(query) ? '' : 'none';
-    });
+  function _shortNum(n) {
+    if (Math.abs(n) >= 1e9) return (n/1e9).toFixed(1)+'B';
+    if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1)+'M';
+    if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(0)+'K';
+    return Math.round(n).toString();
   }
 
+  // ── Formula modal helper (called from formulaKpiModal inline handlers) ────
   function _fmlSelectOp(op) {
     const hidden = document.getElementById('fml-op');
     if (!hidden) return;
+    const prev = hidden.value;
     hidden.value = op;
+
+    // Update button styles
     ['sum','subtract','multiply','divide','avg','min','max','custom'].forEach(o => {
       const btn = document.getElementById('fml-op-btn-'+o);
       const chk = document.getElementById('fml-op-chk-'+o);
       if (!btn) return;
       const active = o === op;
-      btn.style.borderColor = active ? 'var(--brand-accent)' : 'var(--border-card)';
-      btn.style.background  = active ? 'rgba(0,194,168,0.08)' : 'var(--bg-input)';
-      const lbl = btn.querySelector('div:first-child > div:first-child');
-      if (lbl) lbl.style.color = active ? 'var(--brand-accent)' : 'var(--text-primary)';
-      if (chk) {
-        chk.innerHTML = active ? '<div style="width:8px;height:8px;border-radius:50%;background:var(--brand-accent)"></div>' : '';
-        chk.style.borderColor = active ? 'var(--brand-accent)' : 'var(--border-card)';
-      }
+      btn.style.borderColor  = active ? 'var(--brand-accent)' : 'var(--border-card)';
+      btn.style.background   = active ? 'rgba(0,194,168,0.08)' : 'var(--bg-input)';
+      btn.querySelector('div:first-child > div:first-child').style.color = active ? 'var(--brand-accent)' : 'var(--text-primary)';
+      if (chk) chk.innerHTML = active ? '<div style="width:8px;height:8px;border-radius:50%;background:var(--brand-accent)"></div>' : '';
+      if (chk) chk.style.borderColor = active ? 'var(--brand-accent)' : 'var(--border-card)';
     });
+
+    // Show/hide source vs custom sections
     const srcSec = document.getElementById('fml-source-section');
     const cstSec = document.getElementById('fml-custom-section');
-    if (srcSec) srcSec.style.display = op==='custom' ? 'none' : '';
-    if (cstSec) cstSec.style.display = op==='custom' ? '' : 'none';
+    if (srcSec) srcSec.style.display = op === 'custom' ? 'none' : '';
+    if (cstSec) cstSec.style.display = op === 'custom' ? '' : 'none';
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   return {
-    render, mountCharts,
-    setChartType, toggleMenu, closeMenu, setHeroPosition,
-    toggleKpiPicker, closeCollapsedPicker, toggleHeroKpi, setHeroAllKpis, filterHeroKpiSearch,
-    moveHeroKpi, openStackPicker, setStack, _filterStackList,
-    setCardVizType, toggleCardMenu, closeCardMenu,
-    dndStart, dndEnd, dndOver, dndDrop,
-    _fmlSelectOp, _fmlFilterKpis, _fmlFilterRef,
+    render,
+    mountCharts,
+    setChartType,
+    toggleMenu,
+    closeMenu,
+    toggleKpiPicker,
+    toggleHeroKpi,
+    setHeroAllKpis,
+    setHeroPosition,
+    filterHeroKpiSearch,
+    _fmlSelectOp,
   };
 })();
+/**
+ * pages.js v5
+ * Rebuilt Data Entry:
+ *  - Simple mode: compact table with inline operator + unit selectors on target cells
+ *  - Advanced mode: per-KPI accordion cards — metadata collapses, months get full width
+ *  - Operator choices: none, >, >=, <, <=, =, <>
+ *  - Unit choices: none, $, %
+ */
+
 const Pages = (() => {
 
   const OPS   = ['', '>', '>=', '<', '<=', '=', '<>'];
@@ -3258,7 +2445,6 @@ const Pages = (() => {
   // ── SECTION PAGE ──────────────────────────────────────────────────────────
   function sectionPage(sectionName) {
     const kpis = DataStore.getKpisBySection(sectionName);
-    const mode = DataStore.getSettings().reportingPeriod || 'monthly';
     return `
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
@@ -3268,14 +2454,14 @@ const Pages = (() => {
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost" style="font-size:12px" onclick="App.promptRenameSection('${encodeURIComponent(sectionName)}')">✎ Rename</button>
-            <button class="btn btn-ghost" style="font-size:12px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${encodeURIComponent(sectionName)}')">🗑 Remove</button>
+            <button class="btn btn-ghost" style="font-size:12px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${encodeURIComponent(sectionName)}')"><i class="fa-solid fa-trash-can"></i> Remove</button>
           </div>
         </div>
-        ${Components.ragSummaryBar(kpis, mode)}
+        ${Components.ragSummaryBar(kpis)}
         ${kpis.length>0?`
           <div class="grid-auto">${kpis.map(kpi=>Components.kpiCard(kpi, DataStore.getPeriodStats(kpi, DataStore.getSettings().reportingPeriod||'monthly'), false)).join('')}</div>`:`
           <div class="card" style="text-align:center;padding:40px">
-            <div style="font-size:28px;margin-bottom:10px">📋</div>
+            <div style="font-size:28px;margin-bottom:10px"><i class="fa-solid fa-clipboard-list"></i></div>
             <div style="font-size:15px;font-weight:600;margin-bottom:6px">No KPIs in this section</div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Add KPIs from Data Entry and assign them to this section.</div>
             <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
@@ -3302,7 +2488,7 @@ const Pages = (() => {
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
           <h2 class="section-title" style="margin:0">Data Entry</h2>
-          <div class="de-add-btns" style="display:flex;gap:8px">
+          <div style="display:flex;gap:8px">
             <button class="btn btn-primary" onclick="App.openAddKpi()">+ New KPI</button>
             <button class="btn btn-ghost" onclick="App.openAddSectionModal()">+ New Section</button>
           </div>
@@ -3319,15 +2505,15 @@ const Pages = (() => {
 
   // ── KPI TAB ───────────────────────────────────────────────────────────────
   function _renderKpiTab(advancedMode, expandedKpiId) {
-    const allKpis    = DataStore.getKpis().filter(k => !k.isFormula);
-    const sections   = [...new Set(allKpis.map(k => k.section))];
+    const allKpis    = DataStore.getKpis();
+    const sections   = DataStore.getSections();
     const thresholds = DataStore.getThresholds();
     const fyMonths   = DataStore.getFyMonths();
 
     if (allKpis.length === 0) {
       return `
         <div class="card" style="text-align:center;padding:56px 40px;border:2px dashed var(--border-card)">
-          <div style="font-size:40px;margin-bottom:14px">📋</div>
+          <div style="font-size:40px;margin-bottom:14px"><i class="fa-solid fa-clipboard-list"></i></div>
           <div style="font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:8px">No KPIs yet</div>
           <div style="font-size:13px;color:var(--text-secondary);max-width:360px;margin:0 auto 20px">
             Start by creating a section, then add your KPIs. You can also bulk-import from XLSX or CSV.
@@ -3337,8 +2523,7 @@ const Pages = (() => {
             <button class="btn btn-ghost" onclick="App.openAddSectionModal()">+ New Section</button>
           </div>
           <div style="margin-top:28px">${Components.xlsxImportPanel()}</div>
-        </div>
-        <button class="mobile-fab" onclick="App.openAddKpi()" title="Add new KPI">+</button>`;
+        </div>`;
     }
 
     return `
@@ -3346,7 +2531,7 @@ const Pages = (() => {
       <div style="margin-bottom:20px">
         <details style="background:var(--bg-card);border:1px solid var(--border-card);border-radius:10px;overflow:hidden">
           <summary style="padding:12px 16px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-secondary);list-style:none;display:flex;align-items:center;gap:8px">
-            <span style="font-size:16px">📊</span> Bulk Import via XLSX / CSV
+            <i class="fa-solid fa-chart-bar"></i> Bulk Import via XLSX / CSV
             <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">click to expand ▾</span>
           </summary>
           <div style="padding:16px;border-top:1px solid var(--border-subtle)">${Components.xlsxImportPanel()}</div>
@@ -3363,16 +2548,7 @@ const Pages = (() => {
                      placeholder="Search KPIs…"
                      value="${App._kpiSearchQuery||''}"
                      oninput="App.setKpiSearch(this.value)">
-              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none">⌕</span>
-            </div>
-            <div style="position:relative" id="sec-filter-adv-wrap">
-              <button onclick="App.toggleSectionFilterDropdown('adv')"
-                      style="display:flex;align-items:center;gap:5px;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:500;
-                             border:1px solid ${App._kpiSectionFilter?'var(--brand-accent)':'var(--border-card)'};
-                             background:${App._kpiSectionFilter?'rgba(0,194,168,0.1)':'var(--bg-card)'};
-                             color:${App._kpiSectionFilter?'var(--brand-accent)':'var(--text-secondary)'};cursor:pointer;white-space:nowrap">
-                ⊞ ${App._kpiSectionFilter||'All Sections'}
-              </button>
+              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none"><i class="fa-solid fa-magnifying-glass"></i></span>
             </div>` : `
             <div style="position:relative;flex:1;max-width:280px">
               <input type="text" id="kpi-search-simple" class="input-field"
@@ -3380,16 +2556,7 @@ const Pages = (() => {
                      placeholder="Search KPIs…"
                      value="${App._simpleSearchQuery||''}"
                      oninput="App.setSimpleKpiSearch(this.value)">
-              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none">⌕</span>
-            </div>
-            <div style="position:relative" id="sec-filter-simple-wrap">
-              <button onclick="App.toggleSectionFilterDropdown('simple')"
-                      style="display:flex;align-items:center;gap:5px;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:500;
-                             border:1px solid ${App._simpleSectionFilter?'var(--brand-accent)':'var(--border-card)'};
-                             background:${App._simpleSectionFilter?'rgba(0,194,168,0.1)':'var(--bg-card)'};
-                             color:${App._simpleSectionFilter?'var(--brand-accent)':'var(--text-secondary)'};cursor:pointer;white-space:nowrap">
-                ⊞ ${App._simpleSectionFilter||'All Sections'}
-              </button>
+              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none"><i class="fa-solid fa-magnifying-glass"></i></span>
             </div>`}
         </div>
         <button onclick="App.toggleAdvancedEntry()"
@@ -3461,18 +2628,15 @@ const Pages = (() => {
         .mc input { padding:6px 4px;font-size:12px;text-align:center;border-radius:6px;border:1px solid var(--border-card);background:var(--bg-input);color:var(--text-secondary);width:100%;outline:none;transition:border-color 0.15s,background 0.15s; }
         .mc input:focus { border-color:var(--brand-accent);background:rgba(0,194,168,0.04);color:var(--text-primary); }
         .mc input.filled { border-color:rgba(0,194,168,0.45);background:rgba(0,194,168,0.06);color:var(--text-primary); }
-
       </style>
       <script>
-        // Re-apply simple search + section filter after re-render
+        // Re-apply simple search filter after re-render
         (function(){
-          setTimeout(function(){
-            App.setSimpleKpiSearch(App._simpleSearchQuery||'');
-            App.applySimpleSectionFilter();
-          }, 0);
+          var q = (App._simpleSearchQuery||'').toLowerCase().trim();
+          if (!q) return;
+          setTimeout(function(){ App.setSimpleKpiSearch(App._simpleSearchQuery||''); }, 0);
         })();
-      </script>
-      <button class="mobile-fab" onclick="App.openAddKpi()" title="Add new KPI">+</button>`;
+      </script>`;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -3480,37 +2644,10 @@ const Pages = (() => {
   // ══════════════════════════════════════════════════════════════════════════
   function _buildSimpleSection(section, sKpis, thresholds, expandedKpiId, fyMonths) {
     const enc = encodeURIComponent(section);
-
-    // Mobile card list — one row per KPI, tap to edit
-    const RAG_COL = { green:'var(--rag-green)', amber:'var(--rag-amber)', red:'var(--rag-red)', neutral:'var(--rag-neutral)' };
-    const mobileCards = sKpis.length === 0
-      ? `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;font-style:italic">No KPIs yet — tap + to add one.</div>`
-      : sKpis.map(kpi => {
-          const rag      = kpi.rag || 'neutral';
-          const ragColor = RAG_COL[rag];
-          const ytdFmt   = kpi.ytd != null ? DataStore.formatValue(kpi.ytd, kpi) : null;
-          return `
-            <div class="mobile-kpi-card" onclick="App.openEditKpi('${kpi.id}')">
-              <div style="width:3px;background:${ragColor};align-self:stretch;flex-shrink:0;border-radius:2px 0 0 2px"></div>
-              <div style="flex:1;padding:12px 14px;min-width:0;overflow:hidden">
-                <div style="font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.4;word-break:break-word;white-space:normal">${_esc(kpi.metric)}</div>
-                <div style="font-size:11px;color:var(--text-muted);margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-                  ${kpi.who ? `<span style="color:var(--brand-accent);font-weight:500">${_esc(kpi.who)}</span>` : ''}
-                  ${ytdFmt  ? `<span>YTD: <strong style="color:var(--text-secondary)">${ytdFmt}</strong></span>` : `<span style="font-style:italic">No data yet</span>`}
-                </div>
-                ${kpi.comment ? `<div style="font-size:11px;color:var(--rag-amber);margin-top:4px;line-height:1.4;word-break:break-word">${_esc(kpi.comment)}</div>` : ''}
-              </div>
-              <div style="display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding:12px 14px;gap:6px;flex-shrink:0;align-self:flex-start;padding-top:14px">
-                <span class="rag-badge ${rag}" style="font-size:10px;padding:2px 7px;white-space:nowrap">${rag.charAt(0).toUpperCase()+rag.slice(1)}</span>
-                <span style="color:var(--text-muted);font-size:20px;line-height:1;font-weight:300">›</span>
-              </div>
-            </div>`;
-        }).join('');
-
     return `
-      <div style="margin-bottom:24px" data-section-name="${section.replace(/"/g,'&quot;')}">
+      <div style="margin-bottom:24px">
         ${_sectionHeader(section, enc)}
-        <div class="desktop-data-view" style="overflow-x:auto;border:1px solid var(--border-card);border-radius:10px;background:var(--bg-card)">
+        <div style="overflow-x:auto;border:1px solid var(--border-card);border-radius:10px;background:var(--bg-card)">
           <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:740px" data-section-table>
             <thead>
               <tr style="background:var(--bg-input);color:var(--text-muted)">
@@ -3533,11 +2670,6 @@ const Pages = (() => {
               ${sKpis.length===0?`<tr><td colspan="9" style="padding:20px;text-align:center;color:var(--text-muted);font-style:italic">No KPIs yet — add one above.</td></tr>`:''}
             </tbody>
           </table>
-        </div>
-        <div class="mobile-data-view">
-          <div style="border:1px solid var(--border-card);border-radius:10px;overflow:hidden;background:var(--bg-card)">
-            ${mobileCards}
-          </div>
         </div>
       </div>`;
   }
@@ -3783,8 +2915,6 @@ const Pages = (() => {
   // ══════════════════════════════════════════════════════════════════════════
   function _buildAdvancedSection(section, sKpis, thresholds, fyMonths) {
     const enc = encodeURIComponent(section);
-    // Filter by section filter
-    if (App._kpiSectionFilter && section !== App._kpiSectionFilter) return '';
     // Filter by search query if one is active
     const q = (App._kpiSearchQuery||'').toLowerCase().trim();
     const filtered = q ? sKpis.filter(k => k.metric.toLowerCase().includes(q) || (k.who||'').toLowerCase().includes(q)) : sKpis;
@@ -4005,7 +3135,7 @@ const Pages = (() => {
 
         <div style="background:rgba(58,134,255,0.07);border:1px solid rgba(58,134,255,0.18);border-radius:10px;
                     padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--text-secondary);line-height:1.7">
-          💡 <strong style="color:var(--text-primary)">Target vs Colour Rule:</strong>
+          <i class="fa-solid fa-lightbulb"></i> <strong style="color:var(--text-primary)">Target vs Colour Rule:</strong>
           The target (e.g. <code style="font-family:var(--font-mono);color:var(--brand-accent)">&gt; 80%</code>) defines success.
           The colour rule defines <em>how close you need to be</em> to turn Green or Amber.
           A KPI with an operator target and no rule auto-colours: Green if met, Red if not.
@@ -4156,7 +3286,7 @@ const Pages = (() => {
                 <option value="quarterly"${s.reportingPeriod==='quarterly'?'selected':''}>Quarterly</option>
                 <option value="ytd"      ${s.reportingPeriod==='ytd'?'selected':''}>YTD</option>
                 <option value="yearly"   ${s.reportingPeriod==='yearly'?'selected':''}>Full Year</option>
-                <option value="last_fy"  ${s.reportingPeriod==='last_fy'?'selected':''}>Last FY ⏳</option>
+                <option value="last_fy"  ${s.reportingPeriod==='last_fy'?'selected':''}>Last FY</option>
               </select>
             </div>
             <div>
@@ -4183,11 +3313,8 @@ const Pages = (() => {
           <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">Data Management</h3>
           <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">All data stored in browser localStorage. Export or reset below.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="App.exportCSV()">↓ Export CSV</button>
-            <button class="btn btn-ghost" onclick="App.exportData()">↓ Backup JSON</button>
-            <button class="btn btn-ghost" onclick="document.getElementById('json-restore-input').click()">↑ Restore JSON</button>
-            <input type="file" id="json-restore-input" accept=".json" style="display:none" onchange="App.handleJsonRestore(event)">
-            <button class="btn btn-ghost" style="color:var(--rag-red)" onclick="App.confirmReset()">⚠ Reset All Data</button>
+            <button class="btn btn-ghost" onclick="App.exportData()">↓ Export JSON</button>
+            <button class="btn btn-ghost" style="color:var(--rag-red)" onclick="App.confirmReset()"><i class="fa-solid fa-triangle-exclamation"></i> Reset All Data</button>
           </div>
         </div>
       </div>`;
@@ -4199,7 +3326,7 @@ const Pages = (() => {
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <div class="label-xs" style="flex:1;padding-bottom:5px;border-bottom:1px solid var(--border-subtle)">${_esc(section)}</div>
         <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px" onclick="App.promptRenameSection('${enc}')">✎ Rename</button>
-        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${enc}')">🗑 Remove</button>
+        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${enc}')"><i class="fa-solid fa-trash-can"></i> Remove</button>
       </div>`;
   }
 
@@ -4207,238 +3334,162 @@ const Pages = (() => {
     return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  // ── FORMULAS PAGE ────────────────────────────────────────────────────────
+  // ── FORMULAS PAGE ─────────────────────────────────────────────────────────
   function formulas() {
-    const allKpis     = DataStore.getKpis();
-    const formulaKpis = allKpis.filter(k => k.isFormula);
-    const sourceKpis  = allKpis.filter(k => !k.isFormula);
-    const fmlDefs     = DataStore.getFormulas();
-    const fyMonths    = DataStore.getFyMonths();
-    const settings    = DataStore.getSettings();
-    const mode        = settings.reportingPeriod || 'monthly';
+    const allKpis      = DataStore.getKpis();
+    const formulaKpis  = allKpis.filter(k => k.isFormula);
+    const sourceKpis   = allKpis.filter(k => !k.isFormula);
+    const settings     = DataStore.getSettings();
+    const mode         = settings.reportingPeriod || 'monthly';
+    const fmlDefs      = DataStore.getFormulas();
 
-    const opSymbols = { sum:'+', subtract:'−', multiply:'×', divide:'÷', avg:'avg', min:'min', max:'max', custom:'ƒ' };
-    const opLabels  = { sum:'Sum', subtract:'Subtract', multiply:'Multiply', divide:'Divide', avg:'Average', min:'Min', max:'Max', custom:'Custom' };
+    const opLabels = { sum:'Sum (+)', subtract:'Subtract (−)', multiply:'Multiply (×)', divide:'Divide (÷)', avg:'Average', min:'Minimum', max:'Maximum', custom:'Custom Expression' };
 
-    if (sourceKpis.length === 0) return `
-      <div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
-          <div><h2 class="page-title" style="margin:0 0 4px">Formula KPIs</h2>
-               <div style="font-size:13px;color:var(--text-secondary)">Computed KPIs built from other KPIs</div></div>
-        </div>
-        <div class="card" style="text-align:center;padding:48px">
-          <div style="font-size:40px;margin-bottom:12px">⚠</div>
-          <div style="font-size:15px;font-weight:600;margin-bottom:6px">No source KPIs yet</div>
-          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Add KPIs in Data Entry first — formulas compute their values from existing KPIs.</div>
-          <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
-        </div>
-      </div>`;
-
-    // ── Search bar state (module-level var for filter)
-    const tableRows = formulaKpis.map(kpi => {
-      const fml         = fmlDefs.find(f => f.kpiId === kpi.id);
-      const ps          = DataStore.getPeriodStats(kpi, mode);
-      const ragCol      = { green:'var(--rag-green)', amber:'var(--rag-amber)', red:'var(--rag-red)', neutral:'var(--rag-neutral)' }[kpi.rag||'neutral'];
-      const opSym       = opSymbols[fml?.op] || '+';
-      const operandNames= (fml?.operands||[]).map(id=>{const k=allKpis.find(x=>x.id===id);return k?k.metric:'(deleted)';});
-
-      const formulaDisplay = fml?.op === 'custom'
-        ? `<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary);word-break:break-all">${_esc(fml.expression||'')}</span>`
-        : operandNames.map((n,i)=>`<span style="background:var(--bg-input);border-radius:3px;padding:1px 5px;font-size:10px;white-space:nowrap">${_esc(n)}</span>${i<operandNames.length-1?` <span style="color:var(--brand-accent);font-weight:700;font-size:11px">${opSym}</span> `:''}`).join('');
-
-      // Monthly sparkline mini-bars inline
-      const ma   = kpi.monthlyActuals || {};
-      const mVals= fyMonths.map(m => ma[m]!==undefined ? parseFloat(ma[m]) : null);
-      const mMax = Math.max(...mVals.filter(v=>v!==null), 1);
-      const sparkline = `
-        <div style="display:flex;gap:1px;align-items:flex-end;height:24px;width:120px">
-          ${fyMonths.map((m,i)=>{
-            const v = mVals[i];
-            const h = v!==null ? Math.max(2,Math.round((v/mMax)*22)) : 0;
-            return `<div title="${m}: ${v!==null?DataStore.formatValue(v,kpi):'—'}"
-                         style="flex:1;height:${h}px;background:${v!==null?ragCol:'var(--border-subtle)'};border-radius:1px 1px 0 0;
-                                opacity:0.8;min-width:0;cursor:default"
-                         onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'"></div>`;
-          }).join('')}
-        </div>`;
-
-      return `
-        <tr data-fml-name="${_esc(kpi.metric.toLowerCase())}" data-fml-section="${_esc(kpi.section.toLowerCase())}">
-          <!-- RAG dot -->
-          <td style="padding:10px 8px 10px 16px;width:4px;vertical-align:middle">
-            <div style="width:8px;height:8px;border-radius:50%;background:${ragCol};flex-shrink:0"></div>
-          </td>
-          <!-- Name + formula -->
-          <td style="padding:10px 8px;vertical-align:middle;min-width:160px">
-            <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:3px">${_esc(kpi.metric)}</div>
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">${_esc(kpi.section)}${kpi.unit?' · '+kpi.unit:''}</div>
-            <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-              <span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;
-                           background:rgba(0,194,168,0.1);color:var(--brand-accent)">∑ ${opLabels[fml?.op]||'Sum'}</span>
-              ${formulaDisplay}
-            </div>
-          </td>
-          <!-- Computed value -->
-          <td style="padding:10px 8px;vertical-align:middle;text-align:right;white-space:nowrap">
-            <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:${ragCol}">
-              ${ps.actual!==null ? DataStore.formatValue(ps.actual,kpi) : '—'}
-            </div>
-            <div style="font-size:10px;color:var(--text-muted);margin-top:2px">computed</div>
-          </td>
-          <!-- Target -->
-          <td style="padding:10px 8px;vertical-align:middle;text-align:right;white-space:nowrap">
-            <div style="font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--text-primary)">
-              ${DataStore.formatTarget(kpi)}
-            </div>
-            <div style="font-size:10px;color:var(--text-muted);margin-top:2px">target</div>
-          </td>
-          <!-- YTD -->
-          <td style="padding:10px 8px;vertical-align:middle;text-align:right;white-space:nowrap">
-            <div style="font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--text-secondary)">
-              ${kpi.ytd!==null ? DataStore.formatValue(kpi.ytd,kpi) : '—'}
-            </div>
-            <div style="font-size:10px;color:var(--text-muted);margin-top:2px">YTD</div>
-          </td>
-          <!-- Sparkline -->
-          <td style="padding:10px 8px;vertical-align:middle">
-            ${sparkline}
-          </td>
-          <!-- RAG badge -->
-          <td style="padding:10px 8px;vertical-align:middle;text-align:center">
-            <span class="rag-badge ${kpi.rag||'neutral'}">${(kpi.rag||'neutral').charAt(0).toUpperCase()+(kpi.rag||'neutral').slice(1)}</span>
-            ${kpi.isKey?'<div style="font-size:9px;color:var(--brand-accent-2);margin-top:3px;font-weight:600">★ KEY</div>':''}
-          </td>
-          <!-- Actions -->
-          <td style="padding:10px 16px 10px 8px;vertical-align:middle;white-space:nowrap">
-            <div style="display:flex;gap:4px;justify-content:flex-end">
-              <button class="btn btn-ghost" style="font-size:11px;padding:4px 9px"
-                      onclick="App.openEditFormulaKpi('${kpi.id}')">✎ Edit</button>
-              <button class="btn btn-ghost" style="font-size:11px;padding:4px 9px;color:var(--rag-red)"
-                      onclick="App.confirmRemoveFormulaKpi('${kpi.id}')">✕</button>
-            </div>
-          </td>
-        </tr>`;
-    }).join('');
-
-    const emptyRow = `
-      <tr id="fml-empty-row" style="display:none">
-        <td colspan="8" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">
-          ⌕ No formula KPIs match your search
-        </td>
-      </tr>`;
-
-    const noFormulas = formulaKpis.length === 0 ? `
-      <div class="card" style="text-align:center;padding:60px 24px">
+    const emptyState = formulaKpis.length === 0 ? `
+      <div class="card" style="text-align:center;padding:60px 24px;margin-bottom:24px">
         <div style="font-size:48px;margin-bottom:16px">∑</div>
         <div style="font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:8px">No Formula KPIs yet</div>
-        <div style="font-size:13px;color:var(--text-secondary);max-width:420px;margin:0 auto 20px;line-height:1.6">
-          Formula KPIs automatically compute from other KPIs — totals, averages, ratios, and custom expressions.
-          Monthly data flows through so charts and trends work automatically.
+        <div style="font-size:13px;color:var(--text-secondary);max-width:420px;margin:0 auto 20px">
+          Formula KPIs automatically compute their value from other KPIs — totals, averages, ratios, and custom expressions. Monthly data flows through too, so charts and trends work automatically.
         </div>
         <button class="btn btn-primary" onclick="App.openAddFormulaKpi()" style="font-size:14px;padding:10px 24px">
           ∑ Create Formula KPI
         </button>
       </div>` : '';
 
-    // Mobile card list
-    const mobileList = formulaKpis.length > 0 ? `
-      <div class="mobile-data-view card" style="padding:0;overflow:hidden">
-        ${formulaKpis.map(kpi => {
-          const fml = fmlDefs.find(f => f.kpiId === kpi.id);
-          const ps  = DataStore.getPeriodStats(kpi, mode);
-          const ragColor = { green:'var(--rag-green)', amber:'var(--rag-amber)', red:'var(--rag-red)', neutral:'var(--rag-neutral)' }[kpi.rag||'neutral'];
-          const rag  = kpi.rag || 'neutral';
-          const opSym = opSymbols[fml?.op] || '+';
-          const operandNames = (fml?.operands||[]).map(id=>{const k=allKpis.find(x=>x.id===id);return k?k.metric:'(deleted)';});
-          const formulaShort = fml?.op === 'custom'
-            ? `ƒ custom`
-            : `${opLabels[fml?.op]||'Sum'}: ${operandNames.slice(0,2).join(` ${opSym} `)}${operandNames.length>2?' …':''}`;
-          const valFmt = ps.actual !== null ? DataStore.formatValue(ps.actual, kpi) : '—';
-          return `
-            <div class="mobile-kpi-card">
-              <div style="width:3px;background:${ragColor};align-self:stretch;flex-shrink:0;border-radius:2px 0 0 2px"></div>
-              <div style="flex:1;padding:12px 14px;min-width:0;overflow:hidden">
-                <div style="font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.4;word-break:break-word">${_esc(kpi.metric)}</div>
-                <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${_esc(kpi.section)} · <span style="color:var(--brand-accent);font-weight:500">${_esc(formulaShort)}</span></div>
-                <div style="font-size:12px;font-weight:700;color:${ragColor};margin-top:4px;font-family:var(--font-display)">${valFmt} <span style="font-size:10px;font-weight:400;color:var(--text-muted)">computed</span></div>
-              </div>
-              <div style="display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding:12px 10px;gap:8px;flex-shrink:0">
-                <span class="rag-badge ${rag}" style="font-size:10px;padding:2px 7px">${rag.charAt(0).toUpperCase()+rag.slice(1)}</span>
-                <div style="display:flex;gap:6px">
-                  <button class="btn btn-ghost" style="font-size:11px;padding:3px 9px"
-                          onclick="App.openEditFormulaKpi('${kpi.id}')">✎</button>
-                  <button class="btn btn-ghost" style="font-size:11px;padding:3px 9px;color:var(--rag-red)"
-                          onclick="App.confirmRemoveFormulaKpi('${kpi.id}')">✕</button>
-                </div>
-              </div>
-            </div>`;
-        }).join('')}
-      </div>` : '';
+    const formulaCards = formulaKpis.map(kpi => {
+      const fml   = fmlDefs.find(f => f.kpiId === kpi.id);
+      const ps    = DataStore.getPeriodStats(kpi, mode);
+      const operandNames = (fml?.operands || []).map(id => {
+        const k = allKpis.find(x => x.id === id);
+        return k ? k.metric : '(deleted)';
+      });
+      const ragCol = kpi.rag === 'green' ? 'var(--rag-green)' : kpi.rag === 'amber' ? 'var(--rag-amber)' : kpi.rag === 'red' ? 'var(--rag-red)' : 'var(--rag-neutral)';
 
-    const table = formulaKpis.length > 0 ? `
-      <div class="desktop-data-view card" style="padding:0;overflow:hidden">
-        <table style="width:100%;border-collapse:collapse" id="fml-table">
-          <thead>
-            <tr style="border-bottom:1px solid var(--border-subtle)">
-              <th style="width:4px;padding:10px 8px 10px 16px"></th>
-              <th style="padding:10px 8px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);text-align:left">Formula KPI</th>
-              <th style="padding:10px 8px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);text-align:right">Value</th>
-              <th style="padding:10px 8px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);text-align:right">Target</th>
-              <th style="padding:10px 8px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);text-align:right">YTD</th>
-              <th style="padding:10px 8px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted)">Trend</th>
-              <th style="padding:10px 8px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);text-align:center">Status</th>
-              <th style="padding:10px 16px 10px 8px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);text-align:right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows}
-            ${emptyRow}
-          </tbody>
-        </table>
-      </div>` : '';
+      // Build a visual formula string
+      const opSymbols = { sum:'+', subtract:'−', multiply:'×', divide:'÷', avg:'avg', min:'min', max:'max', custom:'ƒ' };
+      const opSym = opSymbols[fml?.op] || '+';
+      let formulaStr = fml?.op === 'custom'
+        ? `<span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${_esc(fml.expression || '')}</span>`
+        : operandNames.map((n,i) => `<span style="background:var(--bg-input);border-radius:4px;padding:2px 7px;font-size:11px">${_esc(n)}</span>${i<operandNames.length-1?` <span style="color:var(--brand-accent);font-weight:700">${opSym}</span> `:''}`).join('');
+
+      return `
+        <div class="card" style="position:relative;border-top:3px solid ${ragCol};margin-bottom:16px">
+          <!-- Top row -->
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+                <span style="font-family:var(--font-display);font-size:16px;font-weight:700">${_esc(kpi.metric)}</span>
+                <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(0,194,168,0.12);color:var(--brand-accent);font-weight:600;letter-spacing:0.06em">∑ FORMULA</span>
+                ${kpi.isKey ? '<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(58,134,255,0.12);color:var(--brand-accent-2);font-weight:600"><i class="fa-solid fa-star"></i> KEY</span>' : ''}
+              </div>
+              <div style="font-size:11px;color:var(--text-muted)">${_esc(kpi.section)} ${kpi.who ? '· ' + _esc(kpi.who) : ''}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="App.openEditFormulaKpi('${kpi.id}')">✎ Edit</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--rag-red)" onclick="App.confirmRemoveFormulaKpi('${kpi.id}')">✕</button>
+            </div>
+          </div>
+
+          <!-- Formula expression display -->
+          <div style="background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);white-space:nowrap">Formula:</span>
+            <span style="font-size:12px;font-weight:600;padding:2px 8px;border-radius:4px;background:rgba(0,194,168,0.1);color:var(--brand-accent)">${opLabels[fml?.op] || 'Sum'}</span>
+            <span style="color:var(--text-muted);font-size:11px">of</span>
+            ${formulaStr || '<span style="color:var(--text-muted);font-size:11px">no operands</span>'}
+          </div>
+
+          <!-- KPI stats row -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px">
+            <div>
+              <div class="label-xs" style="margin-bottom:4px">Computed Value</div>
+              <div style="font-family:var(--font-display);font-size:22px;font-weight:700;color:${ragCol}">${ps.actual !== null ? DataStore.formatValue(ps.actual, kpi) : '—'}</div>
+            </div>
+            <div>
+              <div class="label-xs" style="margin-bottom:4px">Target</div>
+              <div style="font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--text-primary)">${DataStore.formatTarget(kpi)}</div>
+            </div>
+            <div>
+              <div class="label-xs" style="margin-bottom:4px">YTD</div>
+              <div style="font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--text-secondary)">${kpi.ytd !== null ? DataStore.formatValue(kpi.ytd, kpi) : '—'}</div>
+            </div>
+            <div>
+              <div class="label-xs" style="margin-bottom:4px">Status</div>
+              <div class="rag-badge ${kpi.rag || 'neutral'}" style="margin-top:2px">${(kpi.rag||'neutral').charAt(0).toUpperCase()+(kpi.rag||'neutral').slice(1)}</div>
+            </div>
+          </div>
+
+          <!-- Monthly breakdown sparkline-style -->
+          ${_formulaMonthlyRow(kpi, DataStore.getFyMonths())}
+        </div>`;
+    }).join('');
 
     const howItWorks = `
-      <div class="card" style="margin-top:20px;border:1px dashed var(--border-card)">
+      <div class="card" style="margin-top:24px;border:1px dashed var(--border-card)">
         <div style="font-family:var(--font-display);font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px">
-          <span style="color:var(--brand-accent)">ⓘ</span> How Formula KPIs work
+          <i class="fa-solid fa-circle-info" style="color:var(--brand-accent)"></i> How Formula KPIs work
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;font-size:13px;color:var(--text-secondary);line-height:1.6">
-          <div><strong style="color:var(--text-primary)">Auto-computed</strong><br>Values recalculate whenever any source KPI is updated.</div>
-          <div><strong style="color:var(--text-primary)">Monthly data flows</strong><br>Each month is computed from source KPI monthly actuals — charts work automatically.</div>
-          <div><strong style="color:var(--text-primary)">Targets inherited</strong><br>Targets use the same formula applied to source KPI targets.</div>
-          <div><strong style="color:var(--text-primary)">Dashboard-ready</strong><br>Toggle ★ Key KPI to pin a formula result on your Overview.</div>
+          <div><strong style="color:var(--text-primary)">Auto-computed</strong><br>Values recalculate instantly whenever any source KPI is updated.</div>
+          <div><strong style="color:var(--text-primary)">Monthly data flows through</strong><br>Each month's value is computed from source KPI monthly actuals, so charts, trends and period views all work.</div>
+          <div><strong style="color:var(--text-primary)">Targets inherited</strong><br>Targets are computed by applying the same formula to the source KPI targets.</div>
+          <div><strong style="color:var(--text-primary)">Dashboard-ready</strong><br>Toggle "Key KPI" to pin a formula result on your Overview dashboard like any other KPI.</div>
         </div>
       </div>`;
 
     return `
       <div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
           <div>
             <h2 class="page-title" style="margin:0 0 4px">Formula KPIs</h2>
-            <div style="font-size:13px;color:var(--text-secondary)">Computed KPIs built from other KPIs · ${formulaKpis.length} total</div>
+            <div style="font-size:13px;color:var(--text-secondary)">Compute KPIs automatically from other KPIs using maths</div>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            ${formulaKpis.length > 0 ? `
-            <div style="position:relative">
-              <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:13px;pointer-events:none">⌕</span>
-              <input type="text" id="fml-page-search" class="input-field"
-                     style="padding-left:30px;width:220px;font-size:13px"
-                     placeholder="Search formulas…"
-                     oninput="App.filterFormulaPage(this.value)">
-            </div>` : ''}
-            <button class="btn btn-primary" onclick="App.openAddFormulaKpi()" style="gap:8px">
-              <span style="font-size:16px">∑</span> New Formula KPI
-            </button>
-          </div>
+          <button class="btn btn-primary" onclick="App.openAddFormulaKpi()" style="gap:8px">
+            <span style="font-size:16px">∑</span> New Formula KPI
+          </button>
         </div>
-        ${noFormulas}
-        ${mobileList}
-        ${table}
-        ${howItWorks}
-      </div>
-      <button class="mobile-fab" onclick="App.openAddFormulaKpi()" title="New Formula KPI" style="font-size:22px">∑</button>`;
+
+        ${sourceKpis.length === 0 ? `
+          <div class="card" style="text-align:center;padding:40px;margin-bottom:24px">
+            <div style="font-size:24px;margin-bottom:10px"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:6px">No source KPIs yet</div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Add some KPIs in Data Entry first — formula KPIs compute their values from existing KPIs.</div>
+            <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
+          </div>` : ''}
+
+        ${emptyState}
+        ${formulaCards}
+        ${formulaKpis.length > 0 || sourceKpis.length > 0 ? howItWorks : ''}
+      </div>`;
   }
 
+  function _formulaMonthlyRow(kpi, fyMonths) {
+    const ma = kpi.monthlyActuals || {};
+    const vals = fyMonths.map(m => ma[m] !== undefined ? parseFloat(ma[m]) : null);
+    const hasData = vals.some(v => v !== null);
+    if (!hasData) return '';
+
+    const max = Math.max(...vals.filter(v => v !== null), 1);
+    const bars = fyMonths.map((m, i) => {
+      const v = vals[i];
+      const h = v !== null ? Math.max(4, Math.round((v / max) * 36)) : 0;
+      const col = v !== null ? 'var(--brand-accent)' : 'var(--border-subtle)';
+      return `<div title="${m}: ${v !== null ? DataStore.formatValue(v, kpi) : '—'}"
+                   style="flex:1;height:${h}px;background:${col};border-radius:2px 2px 0 0;opacity:0.75;align-self:flex-end;min-width:0;cursor:default;transition:opacity 0.1s"
+                   onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.75'"></div>`;
+    }).join('');
+
+    const labels = fyMonths.map(m =>
+      `<div style="flex:1;font-size:8px;text-align:center;color:var(--text-muted);overflow:hidden">${m}</div>`
+    ).join('');
+
+    return `
+      <div style="margin-top:14px;border-top:1px solid var(--border-subtle);padding-top:12px">
+        <div class="label-xs" style="margin-bottom:8px">Monthly Computed Values</div>
+        <div style="display:flex;gap:2px;align-items:flex-end;height:40px">${bars}</div>
+        <div style="display:flex;gap:2px;margin-top:2px">${labels}</div>
+      </div>`;
+  }
 
   return { overview, sectionPage, dataEntry, settings, formulas };
 })();
@@ -4457,9 +3508,6 @@ const App = (() => {
   let _kpiSearchQuery = '';   // search query for advanced data entry
   let _simpleSearchQuery = ''; // search query for simple data entry
   let _expandedKpiId  = null; // single-KPI monthly inline expand
-  let _manageKpiDropdownOpen = false;
-  let _kpiSectionFilter      = '';  // section filter for advanced data entry
-  let _simpleSectionFilter   = '';  // section filter for simple data entry
 
   // ── Init ──────────────────────────────────────────────────────────────────
   function init() {
@@ -4647,22 +3695,10 @@ const App = (() => {
   }
 
   // ── Auto-calc annual from monthly ─────────────────────────────────────────
-  function autoCalcAnnual(changedField) {
-    const mode  = document.querySelector('input[name="e-autocalc"]:checked')?.value || 'none';
-    const fyEl  = document.getElementById('e-tgt-fy');
-    const moEl  = document.getElementById('e-tgt-month');
-    const unit  = document.getElementById('e-unit')?.value || '';
-    if (!fyEl || !moEl || mode === 'none') return;
-    const isPct = unit === '%';
-    function fmt(n) { return n % 1 === 0 ? String(n) : parseFloat(n.toFixed(6)).toString(); }
-    // Only calc in one direction based on which field was changed or which mode was just selected
-    if (mode === 'fy_from_month' && (changedField === 'month' || changedField === 'mode')) {
-      const mo = parseFloat(moEl.value);
-      if (!isNaN(mo)) fyEl.value = isPct ? fmt(mo) : fmt(mo * 12);
-    } else if (mode === 'month_from_fy' && (changedField === 'fy' || changedField === 'mode')) {
-      const fy = parseFloat(fyEl.value);
-      if (!isNaN(fy)) moEl.value = isPct ? fmt(fy) : fmt(fy / 12);
-    }
+  function autoCalcAnnual() {
+    const mo = parseFloat(document.getElementById('e-tgt-month')?.value);
+    const fy = document.getElementById('e-tgt-fy');
+    if (!isNaN(mo) && mo && fy && !fy.value) fy.value = Math.round(mo * 12);
   }
 
   // ── Save KPI ──────────────────────────────────────────────────────────────
@@ -4680,19 +3716,18 @@ const App = (() => {
     const thId      = document.getElementById('e-threshold')?.value;
     const ragOv     = document.getElementById('e-rag-override')?.value        || null;
     const comment   = document.getElementById('e-comment')?.value?.trim()     || '';
-    const isKey          = document.getElementById('e-iskey')?.checked                               || false;
-    const ytdMethod      = document.getElementById('e-ytdmethod')?.value                             || 'sum';
-    const autoCalcTargets = document.querySelector('input[name="e-autocalc"]:checked')?.value       || 'none';
+    const isKey     = document.getElementById('e-iskey')?.checked             || false;
+    const ytdMethod = document.getElementById('e-ytdmethod')?.value           || 'sum';
 
     const fields = {
       metric, section, who, unit,
-      targetFY26:      tgtFY  !== '' ? parseFloat(tgtFY)  : null,
-      targetMonth:     tgtMo  !== '' ? parseFloat(tgtMo)  : null,
-      targetFY26Op:    tgtOp  || null,
-      ytd:             ytdVal !== '' ? parseFloat(ytdVal)  : null,
-      thresholdId:     thId,
-      ragOverride:     ragOv  || null,
-      comment, isKey, ytdMethod, autoCalcTargets,
+      targetFY26:    tgtFY !== ''    ? parseFloat(tgtFY)   : null,
+      targetMonth:   tgtMo !== ''    ? parseFloat(tgtMo)   : null,
+      targetFY26Op:  tgtOp || null,
+      ytd:           ytdVal !== ''    ? parseFloat(ytdVal)    : null,
+      thresholdId:   thId,
+      ragOverride:   ragOv || null,
+      comment, isKey, ytdMethod,
     };
 
     if (isNew) { DataStore.addKpi(fields); showToast('✓ KPI added'); }
@@ -4717,10 +3752,6 @@ const App = (() => {
       return;
     } else if (['targetFY26','targetMonth','ytd','actual'].includes(field)) {
       v = value === '' ? null : parseFloat(value);
-    } else if (field === 'ytdMethod') {
-      DataStore.updateKpi(id, { ytdMethod: v });
-      DataStore.recomputeKpiYtd(id);
-      return;
     }
     DataStore.updateKpi(id, { [field]: v });
   }
@@ -4881,47 +3912,31 @@ const App = (() => {
         const rawRows  = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
         const fmtRows  = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
 
-        // ── Month name lookup ────────────────────────────────────────────────
-        const MONTH_MAP = {
-          'jan':'Jan','january':'Jan','feb':'Feb','february':'Feb',
-          'mar':'Mar','march':'Mar','apr':'Apr','april':'Apr','may':'May',
-          'jun':'Jun','june':'Jun','jul':'Jul','july':'Jul',
-          'aug':'Aug','august':'Aug','sep':'Sep','sept':'Sep','september':'Sep',
-          'oct':'Oct','october':'Oct','nov':'Nov','november':'Nov',
-          'dec':'Dec','december':'Dec',
-        };
-
         // ── Find header row ──────────────────────────────────────────────────
-        let headerRow = -1, colMap = {}, monthCols = [];
+        let headerRow = -1, colMap = {};
         for (let i = 0; i < Math.min(8, rawRows.length); i++) {
           const row = (rawRows[i]||[]).map(c => String(c||'').toLowerCase().trim());
           if (row.some(c => c.includes('metric') || c.includes('kpi'))) {
             headerRow = i;
             row.forEach((c, idx) => {
-              if      (c.includes('metric') || c === 'kpi')          colMap.metric      = idx;
+              if      (c.includes('metric') || c === 'kpi')         colMap.metric      = idx;
               else if (c.includes('section') || c.includes('group')) colMap.section     = idx;
               else if (c.includes('who') || c.includes('owner'))     colMap.who         = idx;
-              else if (c.includes('unit'))                            colMap.unit        = idx;
+              else if (c.includes('unit'))                           colMap.unit        = idx;
               else if (c.includes('label') || c.includes('display')) colMap.targetLabel = idx;
-              // ytd must be checked before 'fy' so "ytd fy26" maps to ytd, not targetFY26
+              else if (c.includes('fy') || c.includes('annual'))     colMap.targetFY26  = idx;
+              else if (c.includes('month') && !c.includes('actual')) colMap.targetMonth = idx;
               else if (c.includes('ytd') || c.includes('year to'))   colMap.ytd         = idx;
               else if (c.includes('actual') || c.includes('current'))colMap.actual      = idx;
-              else if ((c.includes('fy') || c.includes('annual')) && !c.includes('ytd')) colMap.targetFY26  = idx;
-              else if ((c.includes('target') && c.includes('month')) || (c === 'target / month') || (c.includes('monthly') && !c.includes('actual'))) colMap.targetMonth = idx;
               else if (c.includes('rag') || c.includes('status'))    colMap.rag         = idx;
               else if (c.includes('comment') || c.includes('note'))  colMap.comment     = idx;
-              if (MONTH_MAP[c]) monthCols.push({ colIdx: idx, month: MONTH_MAP[c] });
             });
             break;
           }
         }
         if (headerRow < 0) {
           headerRow = 1;
-          colMap = { metric:0, who:1, targetFY26:2, targetMonth:3, ytd:4 };
-        }
-        // If no explicit month headers found, assume FY order from column F (index 5)
-        if (monthCols.length === 0) {
-          DataStore.getFyMonths().forEach((m, i) => monthCols.push({ colIdx: 5 + i, month: m }));
+          colMap = { metric:0, who:1, targetFY26:2, ytd:3, targetMonth:4 };
         }
 
         // ── Cell parser — the heart of the fix ──────────────────────────────
@@ -4990,11 +4005,10 @@ const App = (() => {
           if (!metricRaw) continue;
 
           // Detect section header rows (no target, no owner, no actuals)
-          const hasTgt  = colMap.targetFY26  !== undefined && row[colMap.targetFY26]  !== null && row[colMap.targetFY26]  !== '';
-          const hasTgtM = colMap.targetMonth !== undefined && row[colMap.targetMonth] !== null && row[colMap.targetMonth] !== '';
-          const hasWho  = colMap.who         !== undefined && row[colMap.who];
-          const hasYtd  = colMap.ytd         !== undefined && row[colMap.ytd]         !== null && row[colMap.ytd]         !== '';
-          if (!hasTgt && !hasTgtM && !hasWho && !hasYtd) { currentSection = metricRaw; continue; }
+          const hasTgt = colMap.targetFY26 !== undefined && row[colMap.targetFY26] !== null;
+          const hasWho = colMap.who        !== undefined && row[colMap.who];
+          const hasYtd = colMap.ytd        !== undefined && row[colMap.ytd] !== null;
+          if (!hasTgt && !hasWho && !hasYtd) { currentSection = metricRaw; continue; }
 
           // Parse each numeric cell
           const tgtFY  = parseCell(row[colMap.targetFY26], fmtRow?.[colMap.targetFY26]);
@@ -5020,30 +4034,20 @@ const App = (() => {
             targetLabel = tgtFY.label;                       // e.g. "> 80%" or "$4.2M"
           }
 
-          // Parse month columns (F onwards)
-          const monthlyActuals = {};
-          monthCols.forEach(({ colIdx, month }) => {
-            if (row[colIdx] !== null && row[colIdx] !== undefined) {
-              const cell = parseCell(row[colIdx], fmtRow?.[colIdx]);
-              if (!isNaN(cell.value)) monthlyActuals[month] = cell.value;
-            }
-          });
-
           rows.push({
             section:      row[colMap.section] ? String(row[colMap.section]).trim() : currentSection,
             metric:       metricRaw,
             who:          colMap.who !== undefined && row[colMap.who] ? String(row[colMap.who]).trim() : '',
             unit,
-            targetLabel,
-            targetFY26:   tgtFY.value,
-            targetFY26Op: tgtFY.op,
+            targetLabel,                                     // human-readable display target
+            targetFY26:   tgtFY.value,                       // stored as clean number
+            targetFY26Op: tgtFY.op,                          // '>', '>=', '<', '<=' or null
             targetMonth:  tgtMo.value,
             ytd:          ytdC.value,
             actual:       actC.value,
             rag:          colMap.rag !== undefined && row[colMap.rag]
                             ? String(row[colMap.rag]).toLowerCase().trim() : null,
             comment:      colMap.comment !== undefined ? (row[colMap.comment] || '') : '',
-            monthlyActuals,
           });
         }
 
@@ -5064,22 +4068,6 @@ const App = (() => {
     const sep    = lines[0].includes('\t') ? '\t' : ',';
     const header = lines[0].split(sep).map(h => h.trim().toLowerCase().replace(/"/g, ''));
     const getIdx = (...keys) => { for (const k of keys) { const i = header.findIndex(h => h.includes(k)); if (i >= 0) return i; } return -1; };
-
-    const MONTH_MAP = {
-      'jan':'Jan','january':'Jan','feb':'Feb','february':'Feb',
-      'mar':'Mar','march':'Mar','apr':'Apr','april':'Apr','may':'May',
-      'jun':'Jun','june':'Jun','jul':'Jul','july':'Jul',
-      'aug':'Aug','august':'Aug','sep':'Sep','sept':'Sep','september':'Sep',
-      'oct':'Oct','october':'Oct','nov':'Nov','november':'Nov',
-      'dec':'Dec','december':'Dec',
-    };
-
-    // Detect month columns from header; fall back to FY order from col F (index 5)
-    let monthCols = [];
-    header.forEach((h, idx) => { if (MONTH_MAP[h]) monthCols.push({ colIdx: idx, month: MONTH_MAP[h] }); });
-    if (monthCols.length === 0) {
-      DataStore.getFyMonths().forEach((m, i) => monthCols.push({ colIdx: 5 + i, month: m }));
-    }
 
     const cols = {
       metric:      getIdx('metric','kpi','name'),
@@ -5125,8 +4113,8 @@ const App = (() => {
       if (!metric) return null;
 
       const tgtFY  = parseCell(cols.targetFY26  >= 0 ? c[cols.targetFY26]  : c[2]);
-      const tgtMo  = parseCell(cols.targetMonth >= 0 ? c[cols.targetMonth] : c[3]);
-      const ytdC   = parseCell(cols.ytd         >= 0 ? c[cols.ytd]         : c[4]);
+      const tgtMo  = parseCell(cols.targetMonth >= 0 ? c[cols.targetMonth] : c[4]);
+      const ytdC   = parseCell(cols.ytd         >= 0 ? c[cols.ytd]         : c[3]);
       const actC   = parseCell(cols.actual      >= 0 ? c[cols.actual]      : '');
 
       let unit = '';
@@ -5136,15 +4124,6 @@ const App = (() => {
       let targetLabel = '';
       if (cols.targetLabel >= 0 && c[cols.targetLabel]) targetLabel = c[cols.targetLabel].trim();
       else if (tgtFY.label) targetLabel = tgtFY.label;
-
-      // Parse month columns
-      const monthlyActuals = {};
-      monthCols.forEach(({ colIdx, month }) => {
-        if (c[colIdx] !== undefined && c[colIdx] !== '') {
-          const cell = parseCell(c[colIdx]);
-          if (!isNaN(cell.value)) monthlyActuals[month] = cell.value;
-        }
-      });
 
       return {
         section:      cols.section >= 0 ? (c[cols.section] || currentSection) : currentSection,
@@ -5159,91 +4138,22 @@ const App = (() => {
         actual:       actC.value,
         rag:          cols.rag >= 0 ? (c[cols.rag] || '').toLowerCase() : null,
         comment:      cols.comment >= 0 ? (c[cols.comment] || '') : '',
-        monthlyActuals,
       };
     }).filter(Boolean);
   }
 
   // ── Export / Reset ────────────────────────────────────────────────────────
-  function exportCSV() {
-    const kpis      = DataStore.getKpis();
-    const fyMonths  = DataStore.getFyMonths();
-    const settings  = DataStore.getSettings();
-    const fyLabel   = settings.fiscalYearLabel || 'FY';
-
-    // Escape a CSV cell value
-    const esc = v => {
-      const s = v === null || v === undefined ? '' : String(v);
-      return (s.includes(',') || s.includes('"') || s.includes('\n'))
-        ? `"${s.replace(/"/g,'""')}"` : s;
-    };
-
-    // Header: A-E fixed, then one column per FY month
-    const headerRow = ['Metric','Who',`Target ${fyLabel}`,'Target Month','YTD',...fyMonths];
-
-    const rows = [headerRow];
-
-    // Group by section, emit section header rows as recognised by the importer
-    const sections = DataStore.getSections();
-    sections.forEach(section => {
-      const sKpis = DataStore.getKpisBySection(section);
-      if (!sKpis.length) return;
-      // Section header row (col A = section name, rest empty — importer uses this as section signal)
-      rows.push([section, ...Array(4 + fyMonths.length).fill('')]);
-      sKpis.forEach(kpi => {
-        rows.push([
-          kpi.metric,
-          kpi.who || '',
-          kpi.targetFY26  ?? '',
-          kpi.targetMonth ?? '',
-          kpi.ytd         ?? '',
-          ...fyMonths.map(m => kpi.monthlyActuals?.[m] ?? ''),
-        ]);
-      });
-    });
-
-    const csv  = rows.map(r => r.map(esc).join(',')).join('\r\n');
-    const blob = new Blob([csv], { type:'text/csv' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = `exec-dashboard-${fyLabel}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
-
   function exportData() {
     const data = {
       settings:   DataStore.getSettings(),
       thresholds: DataStore.getThresholds(),
-      formulas:   DataStore.getFormulas(),
       kpis:       DataStore.getKpis(),
       exportedAt: new Date().toISOString(),
     };
     const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href=url; a.download='exec-dashboard-backup.json'; a.click(); URL.revokeObjectURL(url);
-  }
-
-  function handleJsonRestore(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    event.target.value = '';
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const data = JSON.parse(e.target.result);
-        if (!data.kpis && !data.settings && !data.thresholds && !data.formulas) {
-          showToast('⚠ Invalid backup file', 'amber'); return;
-        }
-        if (!confirm(`Restore backup from ${data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'unknown date'}?\nThis will overwrite all current data.`)) return;
-        DataStore.restoreFromBackup(data);
-        navigate('overview');
-        showToast('✓ Backup restored');
-      } catch {
-        showToast('⚠ Could not read backup file', 'amber');
-      }
-    };
-    reader.readAsText(file);
+    a.href=url; a.download='exec-dashboard-export.json'; a.click(); URL.revokeObjectURL(url);
   }
 
   function confirmReset() {
@@ -5317,94 +4227,9 @@ const App = (() => {
     if (box) { box.focus(); box.setSelectionRange(q.length, q.length); }
   }
 
-  // ── Section filter ────────────────────────────────────────────────────────
-  function toggleSectionFilterDropdown(mode) {
-    const wrId = mode === 'adv' ? 'sec-filter-adv-wrap' : 'sec-filter-simple-wrap';
-    const ddId = 'sec-filter-dd-' + mode;
-    let dd = document.getElementById(ddId);
-    if (dd) { dd.remove(); return; }
-    const wrap = document.getElementById(wrId);
-    if (!wrap) return;
-    const sections = DataStore.getSections();
-    const current  = mode === 'adv' ? _kpiSectionFilter : _simpleSectionFilter;
-    dd = document.createElement('div');
-    dd.id = ddId;
-    dd.style.cssText = 'position:fixed;z-index:300;background:var(--bg-modal);border:1px solid var(--border-card);border-radius:10px;box-shadow:var(--shadow-modal);min-width:200px;overflow:hidden';
-    const rect = wrap.getBoundingClientRect();
-    dd.style.top  = (rect.bottom + 4) + 'px';
-    dd.style.left = rect.left + 'px';
-    const makeItem = (label, val) => {
-      const el = document.createElement('div');
-      const active = current === val;
-      el.style.cssText = `padding:9px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;color:${active?'var(--brand-accent)':'var(--text-secondary)'};background:${active?'rgba(0,194,168,0.07)':''}`;
-      el.onmouseover = () => { if (!active) el.style.background='var(--bg-card-hover)'; };
-      el.onmouseout  = () => { if (!active) el.style.background=''; };
-      el.innerHTML   = `<span style="width:13px;text-align:center">${active?'✓':''}</span>${label}`;
-      el.onclick = () => {
-        dd.remove();
-        if (mode === 'adv') setSectionFilter(val);
-        else                setSimpleSectionFilter(val);
-      };
-      return el;
-    };
-    dd.appendChild(makeItem('All Sections', ''));
-    const divider = document.createElement('div');
-    divider.style.cssText = 'height:1px;background:var(--border-subtle);margin:2px 0';
-    dd.appendChild(divider);
-    sections.forEach(s => dd.appendChild(makeItem(s, s)));
-    document.body.appendChild(dd);
-    setTimeout(() => {
-      const close = (e) => { if (!dd.contains(e.target) && !wrap.contains(e.target)) { dd.remove(); document.removeEventListener('click', close); } };
-      document.addEventListener('click', close);
-    }, 0);
-  }
-
-  function setSectionFilter(section) {
-    _kpiSectionFilter = section;
-    render();
-  }
-
-  function setSimpleSectionFilter(section) {
-    _simpleSectionFilter = section;
-    applySimpleSectionFilter();
-    // Re-render to update button label/state
-    render();
-  }
-
-  function applySimpleSectionFilter() {
-    const section = _simpleSectionFilter;
-    // Section blocks are wrapper divs around each [data-section-table]
-    // They have a sibling _sectionHeader above — target the wrapping div by its table's section
-    document.querySelectorAll('[data-section-name]').forEach(block => {
-      const name = block.getAttribute('data-section-name');
-      block.style.display = (!section || name === section) ? '' : 'none';
-    });
-  }
-
   function toggleAdvancedEntry() {
-    // On mobile, show a recommendation before entering monthly entry mode
-    if (!_advancedMode && window.innerWidth <= 768) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:500;display:flex;align-items:center;justify-content:center;padding:24px 16px';
-      overlay.innerHTML = `
-        <div style="background:var(--bg-modal);border:1px solid var(--border-card);border-radius:16px;padding:24px 20px;max-width:360px;width:calc(100% - 32px);box-shadow:var(--shadow-modal);text-align:center">
-          <div style="font-size:28px;margin-bottom:12px">🖥️</div>
-          <div style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:8px">Desktop Recommended</div>
-          <div style="font-size:13px;color:var(--text-secondary);line-height:1.5;margin-bottom:20px">Monthly data entry works best on a larger screen. You can still continue on mobile, but it may be cramped.</div>
-          <div style="display:flex;gap:10px;justify-content:center">
-            <button id="_adv-cancel" class="btn btn-ghost" style="flex:1">Go Back</button>
-            <button id="_adv-continue" class="btn btn-primary" style="flex:1">Continue Anyway</button>
-          </div>
-        </div>`;
-      document.body.appendChild(overlay);
-      overlay.querySelector('#_adv-cancel').onclick  = () => overlay.remove();
-      overlay.querySelector('#_adv-continue').onclick = () => { overlay.remove(); _advancedMode = true; render(); };
-      overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-      return;
-    }
     _advancedMode = !_advancedMode;
     if (!_advancedMode) _kpiSearchQuery = '';
-    _kpiSectionFilter = ''; _simpleSectionFilter = '';
     render();
   }
 
@@ -5412,57 +4237,28 @@ const App = (() => {
   function openKpiInDataEntry(id) {
     _advancedMode = true;
     _dataEntryTab = 'kpis';
-    _expandedKpiId = id; // expand monthly row for this KPI on arrival
     navigate('data-entry');
-    // Scroll to the exact KPI row after render — use requestAnimationFrame inside
-    // the timeout to ensure layout is complete before measuring position
+    // Scroll to the card after render
     setTimeout(() => {
-      requestAnimationFrame(() => {
-        const el = document.querySelector(`tr[data-kpi-id="${id}"]`);
-        if (!el) return;
-        const top = el.getBoundingClientRect().top + window.scrollY - 70;
-        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-      });
-    }, 150);
+      const el = document.querySelector(`[data-kpi-id="${id}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
   }
 
   // ── Manage KPIs dropdown (Overview) ───────────────────────────────────────
-  function _openManageKpiDropdown() {
-    const dd   = document.getElementById('manage-kpi-dropdown');
-    const wrap = document.getElementById('manage-kpi-wrap');
-    if (!dd || !wrap) return;
-    const rect  = wrap.getBoundingClientRect();
-    const menuW = Math.min(320, window.innerWidth - 16);
-    let left = rect.right - menuW;
-    if (left < 8) left = 8;
-    dd.style.position = 'fixed';
-    dd.style.left     = left + 'px';
-    dd.style.right    = 'auto';
-    dd.style.top      = (rect.bottom + 6) + 'px';
-    dd.style.width    = menuW + 'px';
-    dd.style.display  = 'block';
-    _manageKpiDropdownOpen = true;
-  }
-
   function toggleManageKpiDropdown() {
     const dd = document.getElementById('manage-kpi-dropdown');
     if (!dd) return;
     const isOpen = dd.style.display !== 'none';
-    if (isOpen) {
-      dd.style.display = 'none';
-      _manageKpiDropdownOpen = false;
-    } else {
-      _openManageKpiDropdown();
+    dd.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
       setTimeout(() => document.getElementById('manage-kpi-search')?.focus(), 50);
-      // Close on outside click — always look up elements fresh so stale refs don't confuse post-render clicks
+      // Close on outside click
       setTimeout(() => {
         const handler = (e) => {
-          if (!e.target.isConnected) return; // click on a DOM node removed by re-render — ignore
           const wrap = document.getElementById('manage-kpi-wrap');
-          const ddEl = document.getElementById('manage-kpi-dropdown');
-          if (wrap && !wrap.contains(e.target) && (!ddEl || !ddEl.contains(e.target))) {
-            if (ddEl) ddEl.style.display = 'none';
-            _manageKpiDropdownOpen = false;
+          if (wrap && !wrap.contains(e.target)) {
+            dd.style.display = 'none';
             document.removeEventListener('click', handler);
           }
         };
@@ -5476,10 +4272,9 @@ const App = (() => {
     let ids = settings.overviewKpiIds ? [...settings.overviewKpiIds] : DataStore.getKeyKpis().map(k => k.id);
     if (checked && !ids.includes(id)) ids.push(id);
     if (!checked) ids = ids.filter(x => x !== id);
-    // setOverviewKpiIds triggers a full re-render (closes dropdown) — reopen after
-    const wasOpen = _manageKpiDropdownOpen;
     DataStore.setOverviewKpiIds(ids);
-    if (wasOpen) _openManageKpiDropdown();
+    const badge = document.querySelector('#manage-kpi-wrap button span');
+    if (badge) badge.textContent = `${DataStore.getOverviewKpis().length}/${DataStore.getKpis().length}`;
   }
 
   // Called from any overview checkbox — syncs both isKey and overviewKpiIds atomically
@@ -5496,10 +4291,7 @@ const App = (() => {
       : DataStore.getKeyKpis().map(k => k.id);
     if (checked && !ids.includes(id)) ids.push(id);
     if (!checked) ids = ids.filter(x => x !== id);
-    // setOverviewKpiIds triggers a full re-render (closes dropdown) — reopen after
-    const wasOpen = _manageKpiDropdownOpen;
     DataStore.setOverviewKpiIds(ids);
-    if (wasOpen) _openManageKpiDropdown();
   }
 
   function setAllOverviewKpis(selected) {
@@ -5517,41 +4309,17 @@ const App = (() => {
   function filterManageKpiList(q) {
     const list = document.getElementById('manage-kpi-list');
     if (!list) return;
-    const items = list.querySelectorAll('div.mkpi-row');
+    const items = list.querySelectorAll('div[onmouseover]');
     const query = q.toLowerCase().trim();
-    let visible = 0;
     items.forEach(div => {
+      // KPI name is in the first child div's first child div (font-size:12px name element)
       const nameEl = div.querySelector('div > div:first-child');
-      const sectEl = div.querySelector('div > div:last-child');
       const name = nameEl?.textContent?.toLowerCase() || '';
-      const sect = sectEl?.textContent?.toLowerCase() || '';
-      const show = !query || name.includes(query) || sect.includes(query);
-      div.style.display = show ? 'flex' : 'none';
-      if (show) {
-        div.style.borderTop = visible === 0 ? 'none' : '1px solid var(--border-subtle)';
-        visible++;
-      }
+      div.style.display = (!query || name.includes(query)) ? '' : 'none';
     });
   }
 
   // ── Formula KPI management ────────────────────────────────────────────────
-  function filterFormulaPage(q) {
-    const query = q.toLowerCase().trim();
-    const rows  = document.querySelectorAll('#fml-table tbody tr[data-fml-name]');
-    let visible = 0;
-    rows.forEach(row => {
-      const name = row.dataset.fmlName || '';
-      const sect = row.dataset.fmlSection || '';
-      const show = !query || name.includes(query) || sect.includes(query);
-      row.style.display = show ? '' : 'none';
-      if (show) visible++;
-    });
-    const emptyRow = document.getElementById('fml-empty-row');
-    if (emptyRow) emptyRow.style.display = visible === 0 && rows.length > 0 ? '' : 'none';
-    const box = document.getElementById('fml-page-search');
-    if (box) { box.focus(); box.setSelectionRange(q.length, q.length); }
-  }
-
   function openAddFormulaKpi() {
     const kpis = DataStore.getKpis().filter(k => !k.isFormula);
     showModal(Components.formulaKpiModal(null, null, kpis, false));
@@ -5625,9 +4393,6 @@ const App = (() => {
     get _simpleSearchQuery() { return _simpleSearchQuery; },
     get _expandedKpiId()     { return _expandedKpiId; },
     setKpiSearch, setSimpleKpiSearch, openKpiInDataEntry, toggleKpiKey, toggleKpiMonthly,
-    get _kpiSectionFilter()    { return _kpiSectionFilter; },
-    get _simpleSectionFilter() { return _simpleSectionFilter; },
-    toggleSectionFilterDropdown, setSectionFilter, setSimpleSectionFilter, applySimpleSectionFilter,
     toggleManageKpiDropdown, toggleOverviewKpi, addKpiToOverview, setAllOverviewKpis, filterManageKpiList,
     updateFmtPreview,
     openKpiDetail, openEditKpi, openAddKpi,
@@ -5637,7 +4402,7 @@ const App = (() => {
     autoCalcAnnual, saveKpiEdit, quickUpdate,
     confirmRemoveKpi, promptRenameSection, confirmRemoveSection,
     addThresholdLevel, saveThreshold, confirmRemoveThreshold,
-    openAddFormulaKpi, openEditFormulaKpi, saveFormulaKpi, confirmRemoveFormulaKpi, filterFormulaPage,
-    saveSettings, handleXlsxUpload, handleJsonRestore, exportCSV, exportData, confirmReset, showToast, showModal, closeModal,
+    openAddFormulaKpi, openEditFormulaKpi, saveFormulaKpi, confirmRemoveFormulaKpi,
+    saveSettings, handleXlsxUpload, exportData, confirmReset, showToast, closeModal,
   };
 })();
