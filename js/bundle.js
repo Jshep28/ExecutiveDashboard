@@ -3605,43 +3605,151 @@ const Pages = (() => {
         </td>
       </tr>`;
 
-    // Inline monthly expand row
+    // Inline full expand row (metadata + month grid)
+    const filled   = fyMonths ? fyMonths.filter(m=>ma[m]!==undefined&&ma[m]!==null).length : 0;
+    const op       = kpi.targetFY26Op||'';
+    const unit     = kpi.unit||'';
+    const opOpts   = OPS.map(o=>`<option value="${_esc(o)}" ${op===o?'selected':''}>${o||'—'}</option>`).join('');
+    const unitOpts = UNITS.map(u=>`<option value="${u}" ${unit===u?'selected':''}>${u||'#'}</option>`).join('');
     const monthRow = isExpanded && fyMonths ? `
       <tr style="border-top:1px solid rgba(0,194,168,0.2)">
-        <td colspan="9" style="padding:0;background:rgba(0,194,168,0.025)">
-          <div style="padding:12px 14px 14px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <td colspan="9" style="padding:0;background:rgba(0,194,168,0.03)">
+          <div style="padding:14px 16px 16px;display:flex;flex-direction:column;gap:14px">
+
+            <!-- Header bar -->
+            <div style="display:flex;align-items:center;justify-content:space-between">
               <span style="font-size:11px;font-weight:700;color:var(--brand-accent);letter-spacing:0.07em;text-transform:uppercase">
-                ⊞ Monthly Actuals — ${_esc(kpi.metric)}
+                ⊞ ${_esc(kpi.metric)}
               </span>
-              <div style="display:flex;align-items:center;gap:10px">
-                ${fyMonths.filter(m=>ma[m]!==undefined&&ma[m]!==null).length > 0
-                  ? `<span style="font-size:11px;color:var(--brand-accent)">${fyMonths.filter(m=>ma[m]!==undefined&&ma[m]!==null).length}/${fyMonths.length} entered · YTD: <strong>${DataStore.formatValue(kpi.ytd,kpi)}</strong></span>`
-                  : `<span style="font-size:11px;color:var(--text-muted)">No months entered yet</span>`}
-                <button onclick="App.toggleKpiMonthly('${kpi.id}')"
-                        style="padding:3px 10px;border-radius:5px;font-size:11px;font-weight:600;
-                               border:1px solid var(--brand-accent);background:transparent;
-                               color:var(--brand-accent);cursor:pointer">✕ Close</button>
+              <button onclick="App.toggleKpiMonthly('${kpi.id}')"
+                      style="padding:3px 10px;border-radius:5px;font-size:11px;font-weight:600;
+                             border:1px solid var(--brand-accent);background:transparent;
+                             color:var(--brand-accent);cursor:pointer">✕ Close</button>
+            </div>
+
+            <!-- Metadata grid -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+              <div class="adv-fld">
+                <label>KPI Name</label>
+                <input type="text" class="input-field" style="padding:5px 7px;font-size:12px;width:100%"
+                       value="${_esc(kpi.metric)}"
+                       onchange="App.quickUpdate('${kpi.id}','metric',this.value)">
+              </div>
+              <div class="adv-fld">
+                <label>Who / Owner</label>
+                <input type="text" class="input-field" style="padding:5px 7px;font-size:12px;width:100%"
+                       value="${_esc(kpi.who||'')}" list="who-list-de"
+                       onchange="App.quickUpdate('${kpi.id}','who',this.value)">
+              </div>
+              <div class="adv-fld">
+                <label>Target FY <span style="font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0">op · unit · value</span></label>
+                <div class="tc">
+                  <select title="Operator" onchange="App.quickUpdate('${kpi.id}','targetFY26Op',this.value||null)">${opOpts}</select>
+                  <select class="unit-sel" title="Unit" onchange="App.quickUpdate('${kpi.id}','unit',this.value)">${unitOpts}</select>
+                  <div style="position:relative;flex:1">
+                    <input type="number" value="${kpi.targetFY26??''}" placeholder="Annual"
+                           style="padding:5px 6px ${kpi.targetFY26!==null&&kpi.targetFY26!==undefined?'16px':'5px'} 6px;width:100%"
+                           onchange="App.quickUpdate('${kpi.id}','targetFY26',this.value)">
+                    ${kpi.targetFY26!==null&&kpi.targetFY26!==undefined?`<span style="position:absolute;bottom:2px;right:5px;font-size:10px;color:var(--brand-accent);font-weight:500;pointer-events:none">${_fmtRaw(kpi.targetFY26,kpi.unit)}</span>`:''}
+                  </div>
+                </div>
+              </div>
+              <div class="adv-fld">
+                <label>Target / Month</label>
+                <div class="tc">
+                  <select title="Operator" onchange="App.quickUpdate('${kpi.id}','targetFY26Op',this.value||null)">${opOpts}</select>
+                  <select class="unit-sel" title="Unit" onchange="App.quickUpdate('${kpi.id}','unit',this.value)">${unitOpts}</select>
+                  <div style="position:relative;flex:1">
+                    <input type="number" value="${kpi.targetMonth??''}" placeholder="Monthly"
+                           style="padding:5px 6px ${kpi.targetMonth!==null&&kpi.targetMonth!==undefined?'16px':'5px'} 6px;width:100%"
+                           onchange="App.quickUpdate('${kpi.id}','targetMonth',this.value)">
+                    ${kpi.targetMonth!==null&&kpi.targetMonth!==undefined?`<span style="position:absolute;bottom:2px;right:5px;font-size:10px;color:var(--brand-accent);font-weight:500;pointer-events:none">${_fmtRaw(kpi.targetMonth,kpi.unit)}</span>`:''}
+                  </div>
+                </div>
+              </div>
+              <div class="adv-fld">
+                <label>YTD Method <span style="font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0">— how months combine</span></label>
+                <select class="input-field" style="padding:5px 7px;font-size:12px;width:100%"
+                        onchange="App.quickUpdate('${kpi.id}','ytdMethod',this.value)">
+                  <option value="sum"  ${(kpi.ytdMethod||'sum')==='sum' ?'selected':''}>∑ Sum (revenue, volume)</option>
+                  <option value="avg"  ${kpi.ytdMethod==='avg' ?'selected':''}>x̄ Average (%, rates, scores)</option>
+                  <option value="last" ${kpi.ytdMethod==='last'?'selected':''}>→ Latest month (point-in-time)</option>
+                  <option value="max"  ${kpi.ytdMethod==='max' ?'selected':''}>↑ Highest month (peak)</option>
+                  <option value="min"  ${kpi.ytdMethod==='min' ?'selected':''}>↓ Lowest month (best low)</option>
+                </select>
+              </div>
+              <div class="adv-fld">
+                <label>YTD Actual <span style="font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0">(${{sum:'auto-sums',avg:'auto-averages',last:'latest month',max:'highest month',min:'lowest month'}[kpi.ytdMethod||'sum']})</span></label>
+                <div style="position:relative">
+                  <input type="number" class="input-field" style="padding:5px 7px 13px;font-size:12px;width:100%"
+                         value="${kpi.ytd??''}" placeholder="or override manually"
+                         onchange="App.quickUpdate('${kpi.id}','ytd',this.value)">
+                  ${kpi.ytd!==null&&kpi.ytd!==undefined?`<span style="position:absolute;bottom:3px;right:8px;font-size:10px;color:var(--brand-accent);font-weight:500;pointer-events:none">${_fmtRaw(kpi.ytd,kpi.unit)}</span>`:''}
+                </div>
+              </div>
+              <div class="adv-fld">
+                <label>Colour Rule</label>
+                <select class="input-field" style="padding:5px 7px;font-size:12px;width:100%"
+                        onchange="App.quickUpdate('${kpi.id}','thresholdId',this.value)">
+                  ${thresholds.map(th=>`<option value="${th.id}" ${kpi.thresholdId===th.id?'selected':''}>${th.name}</option>`).join('')}
+                </select>
+              </div>
+              <div class="adv-fld">
+                <label>RAG Override</label>
+                <select class="input-field" style="padding:5px 7px;font-size:12px;width:100%"
+                        onchange="App.quickUpdate('${kpi.id}','ragOverride',this.value||null)">
+                  <option value="" ${!kpi.ragOverride?'selected':''}>Auto</option>
+                  <option value="green"   ${kpi.ragOverride==='green'  ?'selected':''}>● Green</option>
+                  <option value="amber"   ${kpi.ragOverride==='amber'  ?'selected':''}>▲ Amber</option>
+                  <option value="red"     ${kpi.ragOverride==='red'    ?'selected':''}>✕ Red</option>
+                  <option value="neutral" ${kpi.ragOverride==='neutral'?'selected':''}>○ N/A</option>
+                </select>
+              </div>
+              <div class="adv-fld" style="grid-column:1/-1">
+                <label>Comment / Note</label>
+                <input type="text" class="input-field" style="padding:5px 7px;font-size:12px;width:100%"
+                       value="${_esc(kpi.comment||'')}" placeholder="Optional note…"
+                       onchange="App.quickUpdate('${kpi.id}','comment',this.value)">
+              </div>
+              <div style="grid-column:1/-1;display:flex;gap:8px;padding-top:2px">
+                <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="App.openEditKpi('${kpi.id}')">✎ Full Edit</button>
+                <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;color:var(--rag-red)" onclick="App.confirmRemoveKpi('${kpi.id}')">✕ Remove</button>
               </div>
             </div>
-            <div class="month-grid">
-              ${fyMonths.map(m=>{
-                const hasVal = ma[m]!==undefined && ma[m]!==null;
-                return `
-                  <div class="mc">
-                    <label>${m}</label>
-                    <div style="position:relative">
-                      <input type="number" class="${hasVal?'filled':''}"
-                             value="${hasVal?ma[m]:''}" placeholder="—"
-                             style="padding:6px 4px ${hasVal?'16px':'6px'};width:100%"
-                             onfocus="this.select()"
-                             onchange="App.updateMonthlyActual('${kpi.id}','${m}',this.value)"
-                             title="${m} actual for ${_esc(kpi.metric)}">
-                      ${hasVal?`<span style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--brand-accent);font-weight:500;pointer-events:none;white-space:nowrap">${_fmtRaw(ma[m], kpi.unit)}</span>`:''}
-                    </div>
-                  </div>`;
-              }).join('')}
+
+            <!-- Month grid -->
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <span style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:0.07em;text-transform:uppercase">
+                  Monthly Actuals
+                  <span style="font-weight:400;color:var(--brand-accent);margin-left:6px;text-transform:none;letter-spacing:0">
+                    · ${{sum:'summing',avg:'averaging',last:'latest month',max:'peak',min:'lowest'}[kpi.ytdMethod||'sum']}
+                  </span>
+                </span>
+                ${filled>0
+                  ? `<span style="font-size:11px;color:var(--brand-accent)">${filled}/${fyMonths.length} entered · YTD: <strong>${DataStore.formatValue(kpi.ytd,kpi)}</strong></span>`
+                  : `<span style="font-size:11px;color:var(--text-muted)">No months entered yet</span>`}
+              </div>
+              <div class="month-grid">
+                ${fyMonths.map(m=>{
+                  const hasVal = ma[m]!==undefined && ma[m]!==null;
+                  return `
+                    <div class="mc">
+                      <label>${m}</label>
+                      <div style="position:relative">
+                        <input type="number" class="${hasVal?'filled':''}"
+                               value="${hasVal?ma[m]:''}" placeholder="—"
+                               style="padding:6px 4px ${hasVal?'16px':'6px'};width:100%"
+                               onfocus="this.select()"
+                               onchange="App.updateMonthlyActual('${kpi.id}','${m}',this.value)"
+                               title="${m} actual for ${_esc(kpi.metric)}">
+                        ${hasVal?`<span style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--brand-accent);font-weight:500;pointer-events:none;white-space:nowrap">${_fmtRaw(ma[m],kpi.unit)}</span>`:''}
+                      </div>
+                    </div>`;
+                }).join('')}
+              </div>
             </div>
+
           </div>
         </td>
       </tr>` : '';
@@ -5158,18 +5266,16 @@ const App = (() => {
     }
   }
 
-  // ── Toggle single-KPI inline monthly expand ───────────────────────────────
-  // In simple mode: switches to advanced mode and scrolls to the KPI's full month grid.
-  // In advanced mode: no-op (month grid is always visible there).
+  // ── Toggle single-KPI inline full expand ─────────────────────────────────
   function toggleKpiMonthly(id) {
-    _advancedMode = true;
-    _dataEntryTab = 'kpis';
-    _kpiSearchQuery = '';
+    _expandedKpiId = (_expandedKpiId === id) ? null : id;
     render();
-    setTimeout(() => {
-      const el = document.querySelector(`[data-kpi-id="${id}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
+    if (_expandedKpiId) {
+      setTimeout(() => {
+        const el = document.querySelector(`[data-kpi-id="${id}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+    }
   }
 
   // ── KPI search (advanced mode) ────────────────────────────────────────────

@@ -681,18 +681,16 @@ const App = (() => {
     }
   }
 
-  // ── Toggle single-KPI inline monthly expand ───────────────────────────────
-  // In simple mode: switches to advanced mode and scrolls to the KPI's full month grid.
-  // In advanced mode: no-op (month grid is always visible there).
+  // ── Toggle single-KPI inline full expand ─────────────────────────────────
   function toggleKpiMonthly(id) {
-    _advancedMode = true;
-    _dataEntryTab = 'kpis';
-    _kpiSearchQuery = '';
+    _expandedKpiId = (_expandedKpiId === id) ? null : id;
     render();
-    setTimeout(() => {
-      const el = document.querySelector(`[data-kpi-id="${id}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
+    if (_expandedKpiId) {
+      setTimeout(() => {
+        const el = document.querySelector(`[data-kpi-id="${id}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+    }
   }
 
   // ── KPI search (advanced mode) ────────────────────────────────────────────
