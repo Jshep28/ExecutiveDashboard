@@ -515,12 +515,12 @@ const OverviewPanel = (() => {
          </div>`
       : allKpis.length > 0 ? '' : `
          <div class="card" style="text-align:center;padding:40px;margin-bottom:24px">
-           <div style="font-size:32px;margin-bottom:12px">◈</div>
+           <div style="margin-bottom:12px;color:var(--text-muted)">${Icons.dashboard()}</div>
            <div style="font-size:16px;font-weight:600;margin-bottom:6px">No Key Metrics yet</div>
            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
              In Data Entry, tick the <strong>Ovw</strong> checkbox next to any KPI to pin it here.
            </div>
-           <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
+           <button class="btn btn-primary" style="display:inline-flex;align-items:center;gap:5px" onclick="App.navigate('data-entry')">${Icons.dataEntry()} Go to Data Entry</button>
          </div>`;
 
     // ── Section grid ─────────────────────────────────────────────────────────
@@ -621,7 +621,7 @@ const OverviewPanel = (() => {
                            font-size:12px;font-weight:500;border:1px solid var(--border-card);
                            background:var(--bg-card);color:var(--text-secondary);cursor:pointer;transition:all 0.15s"
                     onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
-              ⊞ Manage KPIs
+              <span style="display:flex;align-items:center;gap:5px">${Icons.grid()} Manage KPIs</span>
               <span style="background:rgba(0,194,168,0.15);color:var(--brand-accent);font-size:10px;
                            padding:1px 6px;border-radius:10px;font-weight:700">${overviewKpis.length}/${allKpis.length}</span>
             </button>
@@ -632,7 +632,7 @@ const OverviewPanel = (() => {
                           display:flex;align-items:center;justify-content:space-between">
                 <div style="font-size:12px;font-weight:600;color:var(--text-primary)">Manage Overview KPIs</div>
                 <button onclick="App.toggleManageKpiDropdown()"
-                        style="color:var(--text-muted);font-size:16px;background:none;border:none;cursor:pointer;padding:0 2px">✕</button>
+                        style="color:var(--text-muted);background:none;border:none;cursor:pointer;padding:0 2px;display:flex;align-items:center">${Icons.close()}</button>
               </div>
               <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle)">
                 <input type="text" id="manage-kpi-search" class="input-field"
@@ -654,7 +654,7 @@ const OverviewPanel = (() => {
             <option value="quarterly" ${settings.reportingPeriod==='quarterly'?'selected':''}>Quarterly</option>
             <option value="ytd"       ${settings.reportingPeriod==='ytd'?'selected':''}>YTD</option>
             <option value="yearly"    ${settings.reportingPeriod==='yearly'?'selected':''}>Full Year</option>
-            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY ⏳</option>
+            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY</option>
           </select>
         </div>
       </div>`;
@@ -685,7 +685,7 @@ const OverviewPanel = (() => {
     const heroKpiIds   = st.heroKpiIds || [];
 
     const chartLabels = { odometer:'Odometer', bar:'Bar Chart', line:'Line Chart', pie:'Pie Chart' };
-    const chartIcons  = { odometer:'◎', bar:'▊', line:'∿', pie:'◕' };
+    const chartIcons  = { odometer: Icons.dashboard, bar: Icons.chart, line: Icons.list, pie: Icons.formula };
 
     // ── Chart type menu ──
     const menuDropdown = menuOpen ? `
@@ -701,9 +701,9 @@ const OverviewPanel = (() => {
                       background:${type===chartType?'rgba(0,194,168,0.08)':'transparent'};
                       color:${type===chartType?'var(--brand-accent)':'var(--text-secondary)'};transition:background 0.1s"
                onmouseover="this.style.background='var(--bg-card-hover)'" onmouseout="this.style.background='${type===chartType?'rgba(0,194,168,0.08)':'transparent'}'">
-            <span style="font-size:16px;width:18px;text-align:center">${chartIcons[type]}</span>
+            <span style="width:18px;text-align:center;display:flex;align-items:center;justify-content:center">${chartIcons[type]()}</span>
             <span style="font-size:13px;font-weight:500">${chartLabels[type]}</span>
-            ${type===chartType?'<span style="margin-left:auto;font-size:11px;color:var(--brand-accent)">✓</span>':''}
+            ${type===chartType?`<span style="margin-left:auto;display:flex;align-items:center;color:var(--brand-accent)">${Icons.check()}</span>`:''}
           </div>`).join('')}
         <div style="padding:8px 12px;border-top:1px solid var(--border-subtle)">
           <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Position</div>
@@ -728,7 +728,7 @@ const OverviewPanel = (() => {
                     display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:12px;font-weight:600;color:var(--text-primary)">Select KPIs for Hero Card</div>
           <button onclick="OverviewPanel.toggleKpiPicker()"
-                  style="color:var(--text-muted);font-size:16px;background:none;border:none;cursor:pointer">✕</button>
+                  style="color:var(--text-muted);background:none;border:none;cursor:pointer;display:flex;align-items:center">${Icons.close()}</button>
         </div>
         <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle)">
           <input type="text" class="input-field" style="padding:6px 10px;font-size:12px"
@@ -762,10 +762,10 @@ const OverviewPanel = (() => {
 
     const cardContent = isEmpty
       ? `<div style="text-align:center;padding:48px 24px;color:var(--text-muted)">
-           <div style="font-size:36px;margin-bottom:12px">◈</div>
+           <div style="margin-bottom:12px;color:var(--text-muted)">${Icons.dashboard()}</div>
            <div style="font-size:15px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">No KPIs configured</div>
            <div style="font-size:13px;margin-bottom:16px">Add KPIs in Data Entry to visualise them here.</div>
-           <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
+           <button class="btn btn-primary" style="display:inline-flex;align-items:center;gap:5px" onclick="App.navigate('data-entry')">${Icons.dataEntry()} Go to Data Entry</button>
          </div>`
       : `<div id="hero-chart-area" style="min-height:200px;padding:8px 0">
            <div style="text-align:center;padding:32px;color:var(--text-muted);font-size:12px">Loading chart…</div>
