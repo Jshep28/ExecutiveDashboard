@@ -75,8 +75,6 @@ const App = (() => {
       const sb = document.getElementById('sidebar');
       if (sb) sb.classList.add('open');
     }
-    // Activate any Lucide icons injected by this render
-    if (window.lucide) lucide.createIcons();
   }
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
@@ -94,7 +92,6 @@ const App = (() => {
     el.id = 'modal-root';
     el.innerHTML = html;
     document.body.appendChild(el);
-    if (window.lucide) lucide.createIcons();
   }
 
   function closeModal() {

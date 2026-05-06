@@ -54,7 +54,7 @@ const Components = (() => {
               title="${kpi.isKey?'Remove from Key Metrics':'Add to Key Metrics'}"
               style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;
                      color:${kpi.isKey?'var(--brand-accent)':'var(--text-muted)'};transition:color 0.15s;flex-shrink:0">
-        ${kpi.isKey?'<i data-lucide="pin"></i>':'<i data-lucide="pin-off"></i>'}
+        ${kpi.isKey?'★':'☆'}
       </button>` : '';
 
     return `
@@ -90,7 +90,7 @@ const Components = (() => {
 
     // Static nav items (top-level)
     const staticItems = [
-      { id:'overview',    label:'Overview',   icon:'<i data-lucide="layout-dashboard"></i>' },
+      { id:'overview',    label:'Overview',   icon:'◈' },
       { id:'data-entry',  label:'Data Entry', icon:'✎' },
       { id:'formulas',    label:'Formulas',   icon:'∑' },
       { id:'settings',    label:'Settings',   icon:'⚙' },
@@ -286,7 +286,7 @@ const Components = (() => {
           </div>`:''}
 
           <div style="display:flex;gap:8px">
-            <button class="btn btn-primary" style="flex:1" onclick="App.openKpiInDataEntry('${kpi.id}');App.closeModal()"><i data-lucide="table-2"></i> Monthly Data Entry</button>
+            <button class="btn btn-primary" style="flex:1" onclick="App.openKpiInDataEntry('${kpi.id}');App.closeModal()">⊞ Monthly Data Entry</button>
             <button class="btn btn-ghost" onclick="App.openEditKpi('${kpi.id}');App.closeModal()">✎ Edit KPI</button>
             <button class="btn btn-ghost" onclick="App.closeModal()">Close</button>
           </div>
@@ -489,7 +489,7 @@ const Components = (() => {
   function xlsxImportPanel() {
     return `
       <div class="card" style="border:2px dashed var(--brand-accent);background:rgba(0,194,168,0.04);text-align:center;padding:28px">
-        <div style="font-size:28px;margin-bottom:10px"><i data-lucide="bar-chart-2" style="width:28px;height:28px"></i></div>
+        <div style="font-size:28px;margin-bottom:10px">📊</div>
         <div style="font-family:var(--font-display);font-size:15px;font-weight:600;margin-bottom:6px">Import XLSX / CSV</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;line-height:1.6">
           Upload a spreadsheet with columns:<br>
@@ -591,7 +591,7 @@ const Components = (() => {
 
           <!-- Step 1: Name & meta -->
           <div style="background:var(--bg-input);border-radius:10px;padding:16px;margin-bottom:16px">
-            <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">1. KPI Details</div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">① KPI Details</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
               <div style="grid-column:1/-1">
                 <label class="label-sm" style="display:block;margin-bottom:5px">KPI Name <span style="color:var(--rag-red)">*</span></label>
@@ -620,7 +620,7 @@ const Components = (() => {
               <div style="display:flex;align-items:center;gap:8px;padding-top:18px">
                 <input type="checkbox" id="fml-iskey" ${kpi?.isKey?'checked':''}
                        style="accent-color:var(--brand-accent);width:15px;height:15px;cursor:pointer">
-                <label for="fml-iskey" class="label-sm" style="cursor:pointer"><i data-lucide="pin"></i> Pin to Overview (Key KPI)</label>
+                <label for="fml-iskey" class="label-sm" style="cursor:pointer">★ Pin to Overview (Key KPI)</label>
               </div>
             </div>
             <div>
@@ -632,7 +632,7 @@ const Components = (() => {
 
           <!-- Step 2: Operation -->
           <div style="background:var(--bg-input);border-radius:10px;padding:16px;margin-bottom:16px">
-            <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">2. Formula Operation</div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px">② Formula Operation</div>
             <input type="hidden" id="fml-op" value="${curOp}">
             <div style="max-height:260px;overflow-y:auto;padding-right:4px">${opOptions}</div>
           </div>
@@ -640,7 +640,7 @@ const Components = (() => {
           <!-- Step 3: Source KPIs (hidden when custom) -->
           <div id="fml-source-section" style="background:var(--bg-input);border-radius:10px;padding:16px;margin-bottom:16px;${curOp==='custom'?'display:none':''}">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted)">3. Source KPIs</div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted)">③ Source KPIs</div>
               <div style="display:flex;gap:6px">
                 <button onclick="document.querySelectorAll('.fml-operand-cb').forEach(c=>c.checked=true)" class="btn btn-ghost" style="font-size:10px;padding:3px 8px">All</button>
                 <button onclick="document.querySelectorAll('.fml-operand-cb').forEach(c=>c.checked=false)" class="btn btn-ghost" style="font-size:10px;padding:3px 8px">None</button>
@@ -654,7 +654,7 @@ const Components = (() => {
 
           <!-- Step 3b: Custom expression (shown when custom) -->
           <div id="fml-custom-section" style="background:var(--bg-input);border-radius:10px;padding:16px;margin-bottom:16px;${curOp!=='custom'?'display:none':''}">
-            <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">3. Custom Expression</div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">③ Custom Expression</div>
             <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;line-height:1.6">
               Use KPI IDs as variables. Supports: <code style="background:var(--bg-card);padding:1px 5px;border-radius:3px;font-size:11px">+ - * / ( )</code> and numeric constants.
             </div>
