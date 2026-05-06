@@ -151,11 +151,11 @@ const App = (() => {
 
   function saveNewSection() {
     const name = document.getElementById('new-section-name')?.value?.trim();
-    if (!name) { showToast('Enter a section name', 'amber'); return; }
+    if (!name) { showToast('⚠ Enter a section name', 'amber'); return; }
     DataStore.addSection(name);
     closeModal();
     navigate('section:'+encodeURIComponent(name));
-    showToast('Section "'+name+'" created');
+    showToast('✓ Section "'+name+'" created');
   }
 
   // ── Insert section break between KPIs ─────────────────────────────────────
@@ -188,10 +188,10 @@ const App = (() => {
 
   function confirmInsertSection(kpiId) {
     const name = document.getElementById('insert-section-name')?.value?.trim();
-    if (!name) { showToast('Enter a section name', 'amber'); return; }
+    if (!name) { showToast('⚠ Enter a section name', 'amber'); return; }
     DataStore.splitSectionAt(kpiId, name);
     closeModal();
-    showToast('Section "'+name+'" created');
+    showToast('✓ Section "'+name+'" created');
   }
 
   // ── Monthly actual update ─────────────────────────────────────────────────
@@ -209,7 +209,7 @@ const App = (() => {
   // ── Save KPI ──────────────────────────────────────────────────────────────
   function saveKpiEdit(id, isNew) {
     const metric = document.getElementById('e-metric')?.value?.trim();
-    if (!metric) { showToast('KPI Name is required', 'amber'); return; }
+    if (!metric) { showToast('⚠ KPI Name is required', 'amber'); return; }
 
     const section   = document.getElementById('e-section')?.value?.trim()    || 'General';
     const who       = document.getElementById('e-who')?.value?.trim()         || '';
@@ -235,8 +235,8 @@ const App = (() => {
       comment, isKey, ytdMethod,
     };
 
-    if (isNew) { DataStore.addKpi(fields); showToast('KPI added'); }
-    else       { DataStore.updateKpi(id, fields); showToast('KPI saved'); }
+    if (isNew) { DataStore.addKpi(fields); showToast('✓ KPI added'); }
+    else       { DataStore.updateKpi(id, fields); showToast('✓ KPI saved'); }
     closeModal();
   }
 
@@ -268,7 +268,7 @@ const App = (() => {
     if (!newName || newName === oldName) return;
     DataStore.renameSection(oldName, newName);
     if (_currentPage === 'section:'+encodedSection) _currentPage = 'section:'+encodeURIComponent(newName);
-    showToast('Section renamed');
+    showToast('✓ Section renamed');
   }
 
   function confirmRemoveSection(encodedSection) {
@@ -277,7 +277,7 @@ const App = (() => {
     if (!confirm(`Remove section "${name}" and its ${count} KPI${count!==1?'s':''}? This cannot be undone.`)) return;
     DataStore.removeSection(name);
     if (_currentPage === 'section:'+encodedSection) navigate('overview');
-    showToast('Section removed');
+    showToast('✓ Section removed');
   }
 
   // ── Threshold management ──────────────────────────────────────────────────
@@ -303,7 +303,7 @@ const App = (() => {
 
   function saveThreshold(id, isNew) {
     const name = document.getElementById('th-name')?.value?.trim();
-    if (!name) { showToast('Threshold name is required', 'amber'); return; }
+    if (!name) { showToast('⚠ Threshold name is required', 'amber'); return; }
     const desc = document.getElementById('th-desc')?.value?.trim() || '';
     const type = document.getElementById('th-type')?.value || 'relative';
     const container = document.getElementById('th-levels-container');
@@ -318,8 +318,8 @@ const App = (() => {
       });
     }
     const fields = { name, description:desc, type, levels };
-    if (isNew) { DataStore.addThreshold(fields); showToast('Threshold created'); }
-    else       { DataStore.updateThreshold(id, fields); showToast('Threshold saved'); }
+    if (isNew) { DataStore.addThreshold(fields); showToast('✓ Threshold created'); }
+    else       { DataStore.updateThreshold(id, fields); showToast('✓ Threshold saved'); }
     closeModal();
   }
 
@@ -329,7 +329,7 @@ const App = (() => {
     const usageCount = DataStore.getKpis().filter(k=>k.thresholdId===id).length;
     if (!confirm(`Delete threshold "${th.name}"? ${usageCount} KPI${usageCount!==1?'s':''} will revert to Manual.`)) return;
     DataStore.removeThreshold(id);
-    showToast('Threshold deleted');
+    showToast('✓ Threshold deleted');
     closeModal();
   }
 
@@ -340,7 +340,7 @@ const App = (() => {
     if (!confirm(`Remove KPI "${kpi.metric}"? This cannot be undone.`)) return;
     DataStore.removeKpi(id);
     closeModal();
-    showToast('KPI removed');
+    showToast('✓ KPI removed');
   }
 
   // ── Settings ──────────────────────────────────────────────────────────────
@@ -355,7 +355,7 @@ const App = (() => {
     const pctStorage      = document.getElementById('s-pctstorage')?.value         || 'decimal';
     DataStore.updateSettings({ companyName, fiscalYearLabel, reportingPeriod, fyStartMonth,
                                currencySymbol, decimals, largeNumFormat, pctStorage });
-    showToast('Settings saved');
+    showToast('✓ Settings saved');
   }
 
   function updateFmtPreview() {
@@ -388,7 +388,7 @@ const App = (() => {
       reader.onload = e => {
         const rows = _parseCSV(e.target.result);
         const { updated, added } = DataStore.importFromRows(rows);
-        showToast(`${updated} updated, ${added} added from CSV`);
+        showToast(`✓ ${updated} updated, ${added} added from CSV`);
       };
       reader.readAsText(file);
     } else {
@@ -557,11 +557,11 @@ const App = (() => {
         }
 
         const { updated, added } = DataStore.importFromRows(rows);
-        showToast(`${updated} KPIs updated, ${added} new KPIs added`);
+        showToast(`✓ ${updated} KPIs updated, ${added} new KPIs added`);
         render();
       } catch(err) {
         console.error('XLSX parse error:', err);
-        showToast('Error reading file — check format', 'amber');
+        showToast('⚠ Error reading file — check format', 'amber');
       }
     };
     reader.readAsArrayBuffer(file);
@@ -663,7 +663,7 @@ const App = (() => {
 
   function confirmReset() {
     if (confirm('Reset all data? This will clear ALL KPIs and cannot be undone.')) {
-      DataStore.resetToDefaults(); navigate('overview'); showToast('Reset complete');
+      DataStore.resetToDefaults(); navigate('overview'); showToast('✓ Reset complete');
     }
   }
 
@@ -839,7 +839,7 @@ const App = (() => {
 
   function saveFormulaKpi(kpiId, isEdit) {
     const metric  = document.getElementById('fml-metric')?.value?.trim();
-    if (!metric) { showToast('Name is required', 'amber'); return; }
+    if (!metric) { showToast('⚠ Name is required', 'amber'); return; }
     const section = document.getElementById('fml-section')?.value?.trim() || 'Formulas';
     const unit    = document.getElementById('fml-unit')?.value || '';
     const isKey   = document.getElementById('fml-iskey')?.checked || false;
@@ -850,13 +850,13 @@ const App = (() => {
     // Collect selected operand KPI ids (checkboxes)
     const operands = Array.from(document.querySelectorAll('.fml-operand-cb:checked')).map(el => el.value);
     if (operands.length === 0 && op !== 'custom') {
-      showToast('Select at least one source KPI', 'amber'); return;
+      showToast('⚠ Select at least one source KPI', 'amber'); return;
     }
 
     let expression = '';
     if (op === 'custom') {
       expression = document.getElementById('fml-expression')?.value?.trim() || '';
-      if (!expression) { showToast('Enter a custom expression', 'amber'); return; }
+      if (!expression) { showToast('⚠ Enter a custom expression', 'amber'); return; }
     }
 
     const kpiFields  = { metric, section, unit, isKey, thresholdId: thId, comment };
@@ -864,10 +864,10 @@ const App = (() => {
 
     if (isEdit) {
       DataStore.updateFormulaKpi(kpiId, kpiFields, formulaDef);
-      showToast('Formula KPI updated');
+      showToast('✓ Formula KPI updated');
     } else {
       DataStore.addFormulaKpi(kpiFields, formulaDef);
-      showToast('Formula KPI created');
+      showToast('✓ Formula KPI created');
     }
     closeModal();
   }
@@ -877,7 +877,7 @@ const App = (() => {
     if (!kpi) return;
     if (!confirm(`Remove formula KPI "${kpi.metric}"? This cannot be undone.`)) return;
     DataStore.removeFormulaKpi(kpiId);
-    showToast('Formula KPI removed');
+    showToast('✓ Formula KPI removed');
   }
 
   // ── Toast ─────────────────────────────────────────────────────────────────

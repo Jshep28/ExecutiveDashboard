@@ -4,69 +4,19 @@
  * Sidebar now lists sections as individual nav items (full pages).
  */
 
-// ── Inline SVG icon set ───────────────────────────────────────────────────
-const Icons = (() => {
-  const s = (path, vb='0 0 16 16', extra='') =>
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;flex-shrink:0;${extra}">${path}</svg>`;
-  const sf = (path, vb='0 0 16 16', extra='') =>
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="14" height="14" fill="currentColor" style="display:inline-block;vertical-align:-2px;flex-shrink:0;${extra}">${path}</svg>`;
-  return {
-    // Actions
-    edit:     () => s('<path d="M11.5 2.5a1.414 1.414 0 0 1 2 2L5 13H3v-2L11.5 2.5z"/>'),
-    trash:    () => s('<polyline points="3 5 13 5"/><path d="M5 5V3h6v2"/><rect x="4" y="5" width="8" height="8" rx="1"/>'),
-    close:    () => s('<line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>'),
-    check:    () => s('<polyline points="2 8 6 12 14 4"/>'),
-    search:   () => s('<circle cx="7" cy="7" r="4"/><line x1="10.5" y1="10.5" x2="14" y2="14"/>'),
-    plus:     () => s('<line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>'),
-    upload:   () => s('<polyline points="8 2 8 10"/><polyline points="4 6 8 2 12 6"/><path d="M3 12h10a1 1 0 0 1 1 1v1H2v-1a1 1 0 0 1 1-1z"/>'),
-    download: () => s('<polyline points="8 2 8 10"/><polyline points="4 6 8 10 12 6" transform="rotate(180,8,8)"/><path d="M3 12h10a1 1 0 0 1 1 1v1H2v-1a1 1 0 0 1 1-1z"/>'),
-    export:   () => s('<polyline points="8 10 8 2"/><polyline points="4 6 8 2 12 6"/><path d="M3 12h10a1 1 0 0 1 1 1v1H2v-1a1 1 0 0 1 1-1z"/>'),
-    // Navigation
-    chevronDown:  () => s('<polyline points="3 6 8 11 13 6"/>'),
-    chevronRight: () => s('<polyline points="6 3 11 8 6 13"/>'),
-    arrowLeft:    () => s('<line x1="13" y1="8" x2="3" y2="8"/><polyline points="7 4 3 8 7 12"/>'),
-    arrowRight:   () => s('<line x1="3" y1="8" x2="13" y2="8"/><polyline points="9 4 13 8 9 12"/>'),
-    // Pages / Nav
-    dashboard: () => s('<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>'),
-    dataEntry: () => s('<rect x="2" y="2" width="12" height="12" rx="1.5"/><line x1="5" y1="6" x2="11" y2="6"/><line x1="5" y1="9" x2="11" y2="9"/><line x1="5" y1="12" x2="8" y2="12"/>'),
-    formula:   () => s('<path d="M4 3h5l3 3v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><line x1="6" y1="8" x2="10" y2="8"/><line x1="8" y1="6" x2="8" y2="10"/>','0 0 16 16'),
-    settings:  () => s('<circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.22 3.22l1.42 1.42M11.36 11.36l1.42 1.42M3.22 12.78l1.42-1.42M11.36 4.64l1.42-1.42"/>'),
-    list:      () => s('<line x1="3" y1="4" x2="13" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="9" y2="12"/>'),
-    // Status / Info
-    info:    () => s('<circle cx="8" cy="8" r="6"/><line x1="8" y1="7" x2="8" y2="11"/><circle cx="8" cy="5" r="0.5" fill="currentColor" stroke="none"/>'),
-    warning: () => s('<path d="M8 2L1.5 13h13L8 2z"/><line x1="8" y1="7" x2="8" y2="10"/><circle cx="8" cy="12" r="0.5" fill="currentColor" stroke="none"/>'),
-    // KPI / Data
-    chart:    () => s('<rect x="2" y="9" width="3" height="5" rx="0.5"/><rect x="6.5" y="6" width="3" height="8" rx="0.5"/><rect x="11" y="3" width="3" height="11" rx="0.5"/>'),
-    grid:     () => s('<rect x="2" y="2" width="5" height="5" rx="0.5"/><rect x="9" y="2" width="5" height="5" rx="0.5"/><rect x="2" y="9" width="5" height="5" rx="0.5"/><rect x="9" y="9" width="5" height="5" rx="0.5"/>'),
-    pin:      () => s('<path d="M9 2L14 7l-2 2-1.5-1.5L7 11l1 1-2 2-1-1-2 2-1-1 2-2-1-1 3.5-3.5L5 6l2-2z"/>'),
-    pinOff:   () => s('<path d="M9 2L14 7l-2 2-1.5-1.5L7 11l1 1-2 2-1-1-2 2-1-1 2-2-1-1 3.5-3.5L5 6l2-2z" opacity="0.3"/>'),
-    clock:    () => s('<circle cx="8" cy="8" r="6"/><polyline points="8 5 8 8 10 10"/>'),
-    // RAG dots — filled SVG circles/shapes
-    ragGreen:   () => sf('<circle cx="8" cy="8" r="5"/>'),
-    ragAmber:   () => sf('<path d="M8 3l5 9H3z"/>'),
-    ragRed:     () => sf('<path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>', '0 0 16 16', ''),
-    ragNeutral: () => sf('<circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.6"/>','0 0 16 16',''),
-  };
-})();
-
 const Components = (() => {
 
-  function _ragSvg(rag) {
-    const map = { green: Icons.ragGreen, amber: Icons.ragAmber, red: Icons.ragRed, neutral: Icons.ragNeutral };
-    return (map[rag] || Icons.ragNeutral)();
-  }
-
+  const RAG_ICONS  = { green:'●', amber:'▲', red:'✕', neutral:'○' };
   const RAG_LABELS = { green:'On Track', amber:'At Risk', red:'Off Track', neutral:'No Data' };
-  const RAG_COLORS = { green:'var(--rag-green)', amber:'var(--rag-amber)', red:'var(--rag-red)', neutral:'var(--rag-neutral)' };
 
   function ragBadge(rag) {
     const r = rag||'neutral';
-    return `<span class="rag-badge ${r}" style="color:${RAG_COLORS[r]}">${_ragSvg(r)} ${RAG_LABELS[r]}</span>`;
+    return `<span class="rag-badge ${r}">${RAG_ICONS[r]} ${RAG_LABELS[r]}</span>`;
   }
 
   function ragDot(rag) {
     const r = rag||'neutral';
-    return `<span class="rag-badge ${r}" style="padding:2px 7px;font-size:10px;color:${RAG_COLORS[r]}">${_ragSvg(r)}</span>`;
+    return `<span class="rag-badge ${r}" style="padding:2px 7px;font-size:10px">${RAG_ICONS[r]}</span>`;
   }
 
   // ── KPI Card ──────────────────────────────────────────────────────────────
@@ -104,7 +54,7 @@ const Components = (() => {
               title="${kpi.isKey?'Remove from Key Metrics':'Add to Key Metrics'}"
               style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;
                      color:${kpi.isKey?'var(--brand-accent)':'var(--text-muted)'};transition:color 0.15s;flex-shrink:0">
-        ${kpi.isKey?Icons.pin():Icons.pinOff()}
+        ${kpi.isKey?'★':'☆'}
       </button>` : '';
 
     return `
@@ -140,13 +90,13 @@ const Components = (() => {
 
     // Static nav items (top-level)
     const staticItems = [
-      { id:'overview',    label:'Overview',   icon: Icons.dashboard  },
-      { id:'data-entry',  label:'Data Entry', icon: Icons.dataEntry  },
-      { id:'formulas',    label:'Formulas',   icon: Icons.formula    },
-      { id:'settings',    label:'Settings',   icon: Icons.settings   },
+      { id:'overview',    label:'Overview',   icon:'◈' },
+      { id:'data-entry',  label:'Data Entry', icon:'✎' },
+      { id:'formulas',    label:'Formulas',   icon:'∑' },
+      { id:'settings',    label:'Settings',   icon:'⚙' },
     ];
 
-    const navBtn = (id, label, iconFn, active) => `
+    const navBtn = (id, label, icon, active) => `
       <button class="nav-item ${active?'active':''}"
               onclick="App.navigate('${id}')"
               style="width:100%;display:flex;align-items:center;gap:10px;padding:9px 12px;
@@ -154,7 +104,7 @@ const Components = (() => {
                      color:${active?'var(--brand-accent)':'var(--text-secondary)'};
                      background:${active?'rgba(0,194,168,0.10)':'transparent'};
                      border:none;cursor:pointer;transition:all 0.15s;margin-bottom:2px">
-        <span style="width:18px;text-align:center;display:flex;align-items:center;justify-content:center">${iconFn()}</span>${label}
+        <span style="font-size:15px;width:18px;text-align:center">${icon}</span>${label}
       </button>`;
 
     const sectionBtn = (section, active) => {
@@ -164,8 +114,8 @@ const Components = (() => {
       sKpis.forEach(k=>{counts[k.rag||'neutral']++;});
       const redCount   = counts.red;
       const amberCount = counts.amber;
-      const indicator  = redCount>0 ? `<span style="margin-left:auto;font-size:9px;background:var(--rag-red-bg);color:var(--rag-red);padding:1px 5px;border-radius:3px">${redCount}</span>`
-                        : amberCount>0 ? `<span style="margin-left:auto;font-size:9px;background:var(--rag-amber-bg);color:var(--rag-amber);padding:1px 5px;border-radius:3px">${amberCount}</span>` : '';
+      const indicator  = redCount>0 ? `<span style="margin-left:auto;font-size:9px;background:var(--rag-red-bg);color:var(--rag-red);padding:1px 5px;border-radius:3px">${redCount}✕</span>`
+                        : amberCount>0 ? `<span style="margin-left:auto;font-size:9px;background:var(--rag-amber-bg);color:var(--rag-amber);padding:1px 5px;border-radius:3px">${amberCount}▲</span>` : '';
       const short = section.length>24?section.slice(0,22)+'…':section;
       return `
         <button onclick="App.navigate('${pageId}')"
@@ -175,7 +125,7 @@ const Components = (() => {
                        text-align:left;transition:all 0.15s;gap:6px"
                 onmouseover="if(!${active})this.style.color='var(--text-primary)'"
                 onmouseout="if(!${active})this.style.color='var(--text-muted)'">
-          <span style="width:10px;text-align:center;flex-shrink:0;display:flex;align-items:center">${Icons.chevronRight()}</span>
+          <span style="font-size:10px;width:10px;text-align:center;flex-shrink:0">▸</span>
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${short}</span>
           ${indicator}
         </button>`;
@@ -222,7 +172,7 @@ const Components = (() => {
           ${subtitle?`<div class="label-xs">${subtitle}</div>`:''}
         </div>
         <span class="label-xs" style="color:var(--text-muted)">${now}</span>
-        <button class="btn btn-ghost" style="font-size:12px;padding:6px 12px;display:inline-flex;align-items:center;gap:5px" onclick="App.navigate('data-entry')">${Icons.edit()} Update Data</button>
+        <button class="btn btn-ghost" style="font-size:12px;padding:6px 12px" onclick="App.navigate('data-entry')">✎ Update Data</button>
       </div>`;
   }
 
@@ -299,7 +249,7 @@ const Components = (() => {
               <h3 style="font-family:var(--font-display);font-size:17px;font-weight:700;line-height:1.3">${kpi.metric}</h3>
               ${kpi.who?`<div style="font-size:12px;color:var(--brand-accent);margin-top:4px">Owner: ${kpi.who}</div>`:''}
             </div>
-            <button onclick="App.closeModal()" style="color:var(--text-muted);padding:4px;flex-shrink:0;background:none;border:none;cursor:pointer;display:flex;align-items:center">${Icons.close()}</button>
+            <button onclick="App.closeModal()" style="color:var(--text-muted);font-size:20px;padding:4px;flex-shrink:0">✕</button>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
@@ -336,8 +286,8 @@ const Components = (() => {
           </div>`:''}
 
           <div style="display:flex;gap:8px">
-            <button class="btn btn-primary" style="flex:1;display:inline-flex;align-items:center;gap:5px;justify-content:center" onclick="App.openKpiInDataEntry('${kpi.id}');App.closeModal()">${Icons.grid()} Monthly Data Entry</button>
-            <button class="btn btn-ghost" style="display:inline-flex;align-items:center;gap:5px" onclick="App.openEditKpi('${kpi.id}');App.closeModal()">${Icons.edit()} Edit KPI</button>
+            <button class="btn btn-primary" style="flex:1" onclick="App.openKpiInDataEntry('${kpi.id}');App.closeModal()">⊞ Monthly Data Entry</button>
+            <button class="btn btn-ghost" onclick="App.openEditKpi('${kpi.id}');App.closeModal()">✎ Edit KPI</button>
             <button class="btn btn-ghost" onclick="App.closeModal()">Close</button>
           </div>
         </div>
@@ -354,7 +304,7 @@ const Components = (() => {
         <div class="modal" style="max-width:540px">
           <div style="display:flex;justify-content:space-between;margin-bottom:20px">
             <h3 style="font-family:var(--font-display);font-size:16px;font-weight:700">${isNew?'Add New KPI':'Edit KPI'}</h3>
-            <button onclick="App.closeModal()" style="color:var(--text-muted);padding:4px;background:none;border:none;cursor:pointer;display:flex;align-items:center">${Icons.close()}</button>
+            <button onclick="App.closeModal()" style="color:var(--text-muted);font-size:20px;padding:4px">✕</button>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
@@ -435,10 +385,10 @@ const Components = (() => {
               <label class="label-sm" style="display:block;margin-bottom:5px">RAG Override</label>
               <select id="e-rag-override" class="input-field">
                 <option value="" ${!kpi.ragOverride?'selected':''}>Auto</option>
-                <option value="green"  ${kpi.ragOverride==='green'?'selected':''}>Green</option>
-                <option value="amber"  ${kpi.ragOverride==='amber'?'selected':''}>Amber</option>
-                <option value="red"    ${kpi.ragOverride==='red'?'selected':''}>Red</option>
-                <option value="neutral"${kpi.ragOverride==='neutral'?'selected':''}>N/A</option>
+                <option value="green"  ${kpi.ragOverride==='green'?'selected':''}>● Green</option>
+                <option value="amber"  ${kpi.ragOverride==='amber'?'selected':''}>▲ Amber</option>
+                <option value="red"    ${kpi.ragOverride==='red'?'selected':''}>✕ Red</option>
+                <option value="neutral"${kpi.ragOverride==='neutral'?'selected':''}>○ N/A</option>
               </select>
             </div>
           </div>
@@ -480,7 +430,7 @@ const Components = (() => {
         </select>
         <input type="number" class="input-field" style="padding:6px 8px;font-size:12px" id="lv-val-${i}" value="${lv.value}" step="0.01">
         <input type="text" class="input-field" style="padding:6px 8px;font-size:12px" id="lv-lbl-${i}" value="${lv.label||''}" placeholder="Label">
-        <button onclick="document.getElementById('level-row-${i}').remove()" style="color:var(--rag-red);background:none;border:none;cursor:pointer;display:flex;align-items:center">${Icons.close()}</button>
+        <button onclick="document.getElementById('level-row-${i}').remove()" style="color:var(--rag-red);background:none;border:none;cursor:pointer;font-size:16px">✕</button>
       </div>`).join('');
 
     return `
@@ -488,7 +438,7 @@ const Components = (() => {
         <div class="modal" style="max-width:560px">
           <div style="display:flex;justify-content:space-between;margin-bottom:12px">
             <h3 style="font-family:var(--font-display);font-size:16px;font-weight:700">${isNew?'New Colour Rule':'Edit Colour Rule'}</h3>
-            <button onclick="App.closeModal()" style="color:var(--text-muted);padding:4px;background:none;border:none;cursor:pointer;display:flex;align-items:center">${Icons.close()}</button>
+            <button onclick="App.closeModal()" style="color:var(--text-muted);font-size:20px;padding:4px">✕</button>
           </div>
           <div style="background:rgba(58,134,255,0.07);border:1px solid rgba(58,134,255,0.15);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--text-secondary);line-height:1.6">
             This rule controls <strong style="color:var(--text-primary)">what colour (Green/Amber/Red) the KPI shows</strong>.
@@ -539,7 +489,7 @@ const Components = (() => {
   function xlsxImportPanel() {
     return `
       <div class="card" style="border:2px dashed var(--brand-accent);background:rgba(0,194,168,0.04);text-align:center;padding:28px">
-        <div style="margin-bottom:10px;color:var(--brand-accent)">${Icons.chart()}</div>
+        <div style="font-size:28px;margin-bottom:10px">📊</div>
         <div style="font-family:var(--font-display);font-size:15px;font-weight:600;margin-bottom:6px">Import XLSX / CSV</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;line-height:1.6">
           Upload a spreadsheet with columns:<br>
@@ -547,7 +497,7 @@ const Components = (() => {
           Matching KPIs are updated. New ones are added.
         </div>
         <input type="file" id="xlsx-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="App.handleXlsxUpload(event)">
-        <button class="btn btn-primary" style="display:inline-flex;align-items:center;gap:5px" onclick="document.getElementById('xlsx-file-input').click()">${Icons.upload()} Choose File</button>
+        <button class="btn btn-primary" onclick="document.getElementById('xlsx-file-input').click()">↑ Choose File</button>
         <div style="font-size:10px;color:var(--text-muted);margin-top:10px">Supports .xlsx, .xls, .csv</div>
       </div>`;
   }
@@ -631,12 +581,12 @@ const Components = (() => {
 
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
             <div>
-              <h3 style="font-family:var(--font-display);font-size:17px;font-weight:700;margin:0 0 3px;display:flex;align-items:center;gap:6px">
-                ${isEdit ? Icons.edit() : Icons.formula()} ${isEdit ? 'Edit Formula KPI' : 'New Formula KPI'}
+              <h3 style="font-family:var(--font-display);font-size:17px;font-weight:700;margin:0 0 3px">
+                ${isEdit ? '✎ Edit Formula KPI' : '∑ New Formula KPI'}
               </h3>
               <div style="font-size:12px;color:var(--text-muted)">Computed automatically from source KPIs</div>
             </div>
-            <button onclick="App.closeModal()" style="color:var(--text-muted);background:none;border:none;cursor:pointer;padding:4px;display:flex;align-items:center">${Icons.close()}</button>
+            <button onclick="App.closeModal()" style="color:var(--text-muted);font-size:20px;background:none;border:none;cursor:pointer;padding:4px">✕</button>
           </div>
 
           <!-- Step 1: Name & meta -->
@@ -670,7 +620,7 @@ const Components = (() => {
               <div style="display:flex;align-items:center;gap:8px;padding-top:18px">
                 <input type="checkbox" id="fml-iskey" ${kpi?.isKey?'checked':''}
                        style="accent-color:var(--brand-accent);width:15px;height:15px;cursor:pointer">
-                <label for="fml-iskey" class="label-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">${Icons.pin()} Pin to Overview (Key KPI)</label>
+                <label for="fml-iskey" class="label-sm" style="cursor:pointer">★ Pin to Overview (Key KPI)</label>
               </div>
             </div>
             <div>
@@ -730,7 +680,7 @@ const Components = (() => {
             <button class="btn btn-ghost" onclick="App.closeModal()">Cancel</button>
             <button class="btn btn-primary" style="padding:9px 22px"
                     onclick="App.saveFormulaKpi('${kpi?.id||''}', ${isEdit})">
-              <span style="display:inline-flex;align-items:center;gap:5px">${isEdit ? `${Icons.check()} Save Changes` : `${Icons.formula()} Create Formula KPI`}</span>
+              ${isEdit ? '✓ Save Changes' : '∑ Create Formula KPI'}
             </button>
           </div>
         </div>

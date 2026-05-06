@@ -62,18 +62,18 @@ const Pages = (() => {
             <h2 class="section-title" style="margin:0">${sectionName}</h2>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-ghost" style="font-size:12px" onclick="App.promptRenameSection('${encodeURIComponent(sectionName)}')" style="display:inline-flex;align-items:center;gap:4px">${Icons.edit()} Rename</button>
-            <button class="btn btn-ghost" style="font-size:12px;color:var(--rag-red);display:inline-flex;align-items:center;gap:4px" onclick="App.confirmRemoveSection('${encodeURIComponent(sectionName)}')">${Icons.trash()} Remove</button>
+            <button class="btn btn-ghost" style="font-size:12px" onclick="App.promptRenameSection('${encodeURIComponent(sectionName)}')">✎ Rename</button>
+            <button class="btn btn-ghost" style="font-size:12px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${encodeURIComponent(sectionName)}')">🗑 Remove</button>
           </div>
         </div>
         ${Components.ragSummaryBar(kpis)}
         ${kpis.length>0?`
           <div class="grid-auto">${kpis.map(kpi=>Components.kpiCard(kpi, DataStore.getPeriodStats(kpi, DataStore.getSettings().reportingPeriod||'monthly'), false)).join('')}</div>`:`
           <div class="card" style="text-align:center;padding:40px">
-            <div style="margin-bottom:10px;color:var(--text-muted)">${Icons.list()}</div>
+            <div style="font-size:28px;margin-bottom:10px">📋</div>
             <div style="font-size:15px;font-weight:600;margin-bottom:6px">No KPIs in this section</div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Add KPIs from Data Entry and assign them to this section.</div>
-            <button class="btn btn-primary" onclick="App.navigate('data-entry')" style="display:inline-flex;align-items:center;gap:4px">${Icons.edit()} Go to Data Entry</button>
+            <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
           </div>`}
       </div>`;
   }
@@ -122,7 +122,7 @@ const Pages = (() => {
     if (allKpis.length === 0) {
       return `
         <div class="card" style="text-align:center;padding:56px 40px;border:2px dashed var(--border-card)">
-          <div style="margin-bottom:14px;color:var(--text-muted)">${Icons.list()}</div>
+          <div style="font-size:40px;margin-bottom:14px">📋</div>
           <div style="font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:8px">No KPIs yet</div>
           <div style="font-size:13px;color:var(--text-secondary);max-width:360px;margin:0 auto 20px">
             Start by creating a section, then add your KPIs. You can also bulk-import from XLSX or CSV.
@@ -140,8 +140,8 @@ const Pages = (() => {
       <div style="margin-bottom:20px">
         <details style="background:var(--bg-card);border:1px solid var(--border-card);border-radius:10px;overflow:hidden">
           <summary style="padding:12px 16px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-secondary);list-style:none;display:flex;align-items:center;gap:8px">
-            <span style="display:flex;align-items:center">${Icons.chart()}</span> Bulk Import via XLSX / CSV
-            <span style="margin-left:auto;font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px">click to expand ${Icons.chevronDown()}</span>
+            <span style="font-size:16px">📊</span> Bulk Import via XLSX / CSV
+            <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">click to expand ▾</span>
           </summary>
           <div style="padding:16px;border-top:1px solid var(--border-subtle)">${Components.xlsxImportPanel()}</div>
         </details>
@@ -173,7 +173,7 @@ const Pages = (() => {
                        border:1px solid ${advancedMode?'var(--brand-accent)':'var(--border-card)'};
                        background:${advancedMode?'rgba(0,194,168,0.12)':'transparent'};
                        color:${advancedMode?'var(--brand-accent)':'var(--text-secondary)'};cursor:pointer;white-space:nowrap">
-          <span style="display:flex;align-items:center;gap:6px">${advancedMode ? `${Icons.close()} Exit Monthly Entry` : `${Icons.grid()} Monthly Data Entry`}</span>
+          ${advancedMode ? '✕ Exit Monthly Entry' : '⊞ Monthly Data Entry'}
         </button>
       </div>
 
@@ -184,12 +184,12 @@ const Pages = (() => {
                     margin-left:-24px;margin-right:-24px;padding:9px 24px;
                     margin-bottom:18px;display:flex;align-items:center;gap:14px;
                     backdrop-filter:blur(10px)">
-          <span style="font-size:13px;font-weight:700;color:var(--brand-accent);display:flex;align-items:center;gap:6px">${Icons.grid()} Monthly Entry</span>
+          <span style="font-size:13px;font-weight:700;color:var(--brand-accent)">⊞ Monthly Entry</span>
           <span style="font-size:11px;color:var(--text-secondary)">Click a KPI header to collapse its fields · Teal inputs = data entered · YTD auto-sums monthly actuals</span>
           <button onclick="App.toggleAdvancedEntry()"
                   style="margin-left:auto;padding:5px 14px;border-radius:7px;font-size:11px;font-weight:700;
                          border:1px solid var(--brand-accent);background:transparent;
-                         color:var(--brand-accent);cursor:pointer;display:inline-flex;align-items:center;gap:5px">${Icons.close()} Exit</button>
+                         color:var(--brand-accent);cursor:pointer">✕ Exit</button>
         </div>` : ''}
 
       <!-- Sections -->
@@ -305,9 +305,9 @@ const Pages = (() => {
                     style="background:${isExpanded?'rgba(0,194,168,0.18)':'rgba(255,255,255,0.04)'};
                            border:1px solid ${isExpanded?'var(--brand-accent)':'var(--border-card)'};
                            color:${isExpanded?'var(--brand-accent)':'var(--text-muted)'};
-                           border-radius:4px;cursor:pointer;padding:3px 5px;
-                           flex-shrink:0;transition:all 0.15s;display:flex;align-items:center"
-                    >${Icons.grid()}</button>
+                           border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px;
+                           flex-shrink:0;transition:all 0.15s;font-family:var(--font-mono)"
+                    >⊞</button>
             <div>
               <div style="font-weight:500;color:var(--text-primary)">${_esc(kpi.metric)}</div>
               ${kpi.comment?`<div style="font-size:10px;color:var(--rag-amber);margin-top:1px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(kpi.comment)}</div>`:''}
@@ -340,7 +340,7 @@ const Pages = (() => {
         <td style="padding:6px;text-align:center">${Components.ragDot(rag)}</td>
         <td style="padding:4px 2px;text-align:center;white-space:nowrap">
           <button onclick="App.openEditKpi('${kpi.id}')" title="Full edit"
-                  style="color:var(--text-muted);background:none;border:none;cursor:pointer;font-size:13px;padding:2px">${Icons.edit()}</button>
+                  style="color:var(--text-muted);background:none;border:none;cursor:pointer;font-size:13px;padding:2px">✎</button>
           <button onclick="App.confirmRemoveKpi('${kpi.id}')" title="Remove"
                   style="color:var(--rag-red);background:none;border:none;cursor:pointer;font-size:13px;padding:2px">✕</button>
         </td>
@@ -359,8 +359,8 @@ const Pages = (() => {
 
             <!-- Header bar -->
             <div style="display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:11px;font-weight:700;color:var(--brand-accent);letter-spacing:0.07em;text-transform:uppercase;display:flex;align-items:center;gap:6px">
-                ${Icons.grid()} ${_esc(kpi.metric)}
+              <span style="font-size:11px;font-weight:700;color:var(--brand-accent);letter-spacing:0.07em;text-transform:uppercase">
+                ⊞ ${_esc(kpi.metric)}
               </span>
               <button onclick="App.toggleKpiMonthly('${kpi.id}')"
                       style="padding:3px 10px;border-radius:5px;font-size:11px;font-weight:600;
@@ -453,7 +453,7 @@ const Pages = (() => {
                        onchange="App.quickUpdate('${kpi.id}','comment',this.value)">
               </div>
               <div style="grid-column:1/-1;display:flex;gap:8px;padding-top:2px">
-                <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="App.openEditKpi('${kpi.id}')">${Icons.edit()} Full Edit</button>
+                <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="App.openEditKpi('${kpi.id}')">✎ Full Edit</button>
                 <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;color:var(--rag-red)" onclick="App.confirmRemoveKpi('${kpi.id}')">✕ Remove</button>
               </div>
             </div>
@@ -680,7 +680,7 @@ const Pages = (() => {
                    onchange="App.quickUpdate('${kpi.id}','comment',this.value)">
           </div>
           <div style="grid-column:1/-1;display:flex;gap:8px;padding-top:2px">
-            <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="App.openEditKpi('${kpi.id}')">${Icons.edit()} Full Edit</button>
+            <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="App.openEditKpi('${kpi.id}')">✎ Full Edit</button>
             <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;color:var(--rag-red)" onclick="App.confirmRemoveKpi('${kpi.id}')">✕ Remove</button>
           </div>
         </div>
@@ -774,7 +774,7 @@ const Pages = (() => {
                 <div style="display:flex;align-items:center;justify-content:space-between">
                   <span class="label-xs">${usageCount} KPI${usageCount!==1?'s':''} using this</span>
                   <div style="display:flex;gap:6px">
-                    <button class="btn btn-ghost" style="font-size:11px;padding:3px 9px" onclick="App.openEditThreshold('${th.id}')">${Icons.edit()} Edit</button>
+                    <button class="btn btn-ghost" style="font-size:11px;padding:3px 9px" onclick="App.openEditThreshold('${th.id}')">✎ Edit</button>
                     ${!isBuiltIn?`<button class="btn btn-ghost" style="font-size:11px;padding:3px 9px;color:var(--rag-red)" onclick="App.confirmRemoveThreshold('${th.id}')">Delete</button>`:''}
                   </div>
                 </div>
@@ -895,7 +895,7 @@ const Pages = (() => {
                 <option value="quarterly"${s.reportingPeriod==='quarterly'?'selected':''}>Quarterly</option>
                 <option value="ytd"      ${s.reportingPeriod==='ytd'?'selected':''}>YTD</option>
                 <option value="yearly"   ${s.reportingPeriod==='yearly'?'selected':''}>Full Year</option>
-                <option value="last_fy"  ${s.reportingPeriod==='last_fy'?'selected':''}>Last FY</option>
+                <option value="last_fy"  ${s.reportingPeriod==='last_fy'?'selected':''}>Last FY ⏳</option>
               </select>
             </div>
             <div>
@@ -922,8 +922,8 @@ const Pages = (() => {
           <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">Data Management</h3>
           <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">All data stored in browser localStorage. Export or reset below.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-ghost" style="display:inline-flex;align-items:center;gap:5px" onclick="App.exportData()">${Icons.export()} Export JSON</button>
-            <button class="btn btn-ghost" style="color:var(--rag-red);display:inline-flex;align-items:center;gap:5px" onclick="App.confirmReset()">${Icons.warning()} Reset All Data</button>
+            <button class="btn btn-ghost" onclick="App.exportData()">↓ Export JSON</button>
+            <button class="btn btn-ghost" style="color:var(--rag-red)" onclick="App.confirmReset()">⚠ Reset All Data</button>
           </div>
         </div>
       </div>`;
@@ -934,8 +934,8 @@ const Pages = (() => {
     return `
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <div class="label-xs" style="flex:1;padding-bottom:5px;border-bottom:1px solid var(--border-subtle)">${_esc(section)}</div>
-        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px" onclick="App.promptRenameSection('${enc}')" style="display:inline-flex;align-items:center;gap:4px">${Icons.edit()} Rename</button>
-        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--rag-red);display:inline-flex;align-items:center;gap:4px" onclick="App.confirmRemoveSection('${enc}')">${Icons.trash()} Remove</button>
+        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px" onclick="App.promptRenameSection('${enc}')">✎ Rename</button>
+        <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--rag-red)" onclick="App.confirmRemoveSection('${enc}')">🗑 Remove</button>
       </div>`;
   }
 
@@ -990,13 +990,13 @@ const Pages = (() => {
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
                 <span style="font-family:var(--font-display);font-size:16px;font-weight:700">${_esc(kpi.metric)}</span>
                 <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(0,194,168,0.12);color:var(--brand-accent);font-weight:600;letter-spacing:0.06em">∑ FORMULA</span>
-                ${kpi.isKey ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(58,134,255,0.12);color:var(--brand-accent-2);font-weight:600;display:inline-flex;align-items:center;gap:3px">${Icons.pin()} KEY</span>` : ''}
+                ${kpi.isKey ? '<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(58,134,255,0.12);color:var(--brand-accent-2);font-weight:600">★ KEY</span>' : ''}
               </div>
               <div style="font-size:11px;color:var(--text-muted)">${_esc(kpi.section)} ${kpi.who ? '· ' + _esc(kpi.who) : ''}</div>
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
-              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;display:inline-flex;align-items:center;gap:4px" onclick="App.openEditFormulaKpi('${kpi.id}')">${Icons.edit()} Edit</button>
-              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--rag-red);display:flex;align-items:center" onclick="App.confirmRemoveFormulaKpi('${kpi.id}')">${Icons.close()}</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px" onclick="App.openEditFormulaKpi('${kpi.id}')">✎ Edit</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:var(--rag-red)" onclick="App.confirmRemoveFormulaKpi('${kpi.id}')">✕</button>
             </div>
           </div>
 
@@ -1036,7 +1036,7 @@ const Pages = (() => {
     const howItWorks = `
       <div class="card" style="margin-top:24px;border:1px dashed var(--border-card)">
         <div style="font-family:var(--font-display);font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px">
-          <span style="color:var(--brand-accent);display:flex;align-items:center">${Icons.info()}</span> How Formula KPIs work
+          <span style="color:var(--brand-accent)">ⓘ</span> How Formula KPIs work
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;font-size:13px;color:var(--text-secondary);line-height:1.6">
           <div><strong style="color:var(--text-primary)">Auto-computed</strong><br>Values recalculate instantly whenever any source KPI is updated.</div>
@@ -1053,17 +1053,17 @@ const Pages = (() => {
             <h2 class="page-title" style="margin:0 0 4px">Formula KPIs</h2>
             <div style="font-size:13px;color:var(--text-secondary)">Compute KPIs automatically from other KPIs using maths</div>
           </div>
-          <button class="btn btn-primary" onclick="App.openAddFormulaKpi()" style="gap:8px;display:inline-flex;align-items:center">
-            ${Icons.formula()} New Formula KPI
+          <button class="btn btn-primary" onclick="App.openAddFormulaKpi()" style="gap:8px">
+            <span style="font-size:16px">∑</span> New Formula KPI
           </button>
         </div>
 
         ${sourceKpis.length === 0 ? `
           <div class="card" style="text-align:center;padding:40px;margin-bottom:24px">
-            <div style="margin-bottom:10px;color:var(--rag-amber)">${Icons.warning()}</div>
+            <div style="font-size:24px;margin-bottom:10px">⚠</div>
             <div style="font-size:14px;font-weight:600;margin-bottom:6px">No source KPIs yet</div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Add some KPIs in Data Entry first — formula KPIs compute their values from existing KPIs.</div>
-            <button class="btn btn-primary" style="display:inline-flex;align-items:center;gap:5px" onclick="App.navigate('data-entry')">${Icons.dataEntry()} Go to Data Entry</button>
+            <button class="btn btn-primary" onclick="App.navigate('data-entry')">✎ Go to Data Entry</button>
           </div>` : ''}
 
         ${emptyState}
