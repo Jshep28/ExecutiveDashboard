@@ -621,7 +621,7 @@ const OverviewPanel = (() => {
                            font-size:12px;font-weight:500;border:1px solid var(--border-card);
                            background:var(--bg-card);color:var(--text-secondary);cursor:pointer;transition:all 0.15s"
                     onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
-              ⊞ Manage KPIs
+              <i class="fa-solid fa-table-cells"></i> Manage KPIs
               <span style="background:rgba(0,194,168,0.15);color:var(--brand-accent);font-size:10px;
                            padding:1px 6px;border-radius:10px;font-weight:700">${overviewKpis.length}/${allKpis.length}</span>
             </button>
@@ -654,7 +654,7 @@ const OverviewPanel = (() => {
             <option value="quarterly" ${settings.reportingPeriod==='quarterly'?'selected':''}>Quarterly</option>
             <option value="ytd"       ${settings.reportingPeriod==='ytd'?'selected':''}>YTD</option>
             <option value="yearly"    ${settings.reportingPeriod==='yearly'?'selected':''}>Full Year</option>
-            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY ⏳</option>
+            <option value="last_fy"   ${settings.reportingPeriod==='last_fy'?'selected':''}>Last FY</option>
           </select>
         </div>
       </div>`;
